@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "gmail-parser"
+version = "0.2.0"
+description = "Gmail email processing library with semantic search via ChromaDB"
+authors = ["Nitin Nataraj"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/nitinnat/gmail-parser"
+packages = [{include = "gmail_parser"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+chromadb = "^0.6"
+pydantic-settings = "^2.0"
+google-api-python-client = "^2.0"
+google-auth-httplib2 = "^0.2"
+google-auth-oauthlib = "^0.8"
+sentence-transformers = "^3.0"
+beautifulsoup4 = "^4.12"
+posthog = ">=2.4.0,<4.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
