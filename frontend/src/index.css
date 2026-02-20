@@ -1,0 +1,107 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Barlow+Condensed:wght@400;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent: #00c8f0;
+  --danger: #ff3b3b;
+  --warn:   #e8a000;
+  --ok:     #22c55e;
+  --border: rgba(255,255,255,0.07);
+  --border-hover: rgba(255,255,255,0.13);
+
+  /* Base scale — mirrors tailwind.config.js so var(--base-*) works in inline styles */
+  --base-950: #050505;
+  --base-900: #0d0d0d;
+  --base-800: #141414;
+  --base-700: #242424;
+  --base-600: #444444;
+  --base-500: #888888;
+  --base-400: #aaaaaa;
+  --base-300: #c8c8c8;
+  --base-200: #dedede;
+  --base-100: #eeeeee;
+  --base-50:  #f8f8f8;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #050505;
+  color: #e8e8e8;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Dot-grid texture on content area */
+.dot-grid {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+/* Guarantee text-base-* resolves correctly regardless of Tailwind rebuild state */
+.text-base-50  { color: #f8f8f8; }
+.text-base-100 { color: #eeeeee; }
+.text-base-200 { color: #dedede; }
+.text-base-300 { color: #c8c8c8; }
+.text-base-400 { color: #aaaaaa; }
+.text-base-500 { color: #888888; }
+.text-base-600 { color: #444444; }
+.text-base-700 { color: #242424; }
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #404040; }
+
+/* Page enter animation */
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+.page-in { animation: pageIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+/* Slide-up for bulk bar */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+.slide-up { animation: slideUp 0.18s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+/* Spin */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
+
+/* Indeterminate progress bar */
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* Blink cursor */
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.blink { animation: blink 1.2s step-end infinite; }
+
+/* Checkbox */
+input[type='checkbox'] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Remove default focus rings — we add custom ones */
+*:focus { outline: none; }
+*:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* Table resets */
+table { border-collapse: collapse; width: 100%; }

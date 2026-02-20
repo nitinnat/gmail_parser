@@ -1,9 +1,12 @@
 import base64
 import logging
+import random
+import time
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 
 from bs4 import BeautifulSoup
+from googleapiclient.errors import HttpError
 
 from gmail_parser.auth import GmailAuth
 from gmail_parser.exceptions import GmailAPIError
@@ -36,7 +39,7 @@ class GmailClient:
         self,
         query: str = "",
         label_ids: list[str] | None = None,
-        max_results: int = 100,
+        max_results: int = 10000,
     ) -> list[dict]:
         messages = []
         request = self.service.users().messages().list(
@@ -48,28 +51,80 @@ class GmailClient:
             request = self.service.users().messages().list_next(request, response)
         return messages[:max_results]
 
-    def batch_get_messages(self, message_ids: list[str], format: str = "full") -> list[dict]:
-        results = []
-        batch_size = 50
-        for i in range(0, len(message_ids), batch_size):
-            chunk = message_ids[i : i + batch_size]
-            batch = self.service.new_batch_http_request()
-            chunk_results = [None] * len(chunk)
+    def batch_get_messages(
+        self, message_ids: list[str], format: str = "full", max_retries: int = 7,
+    ) -> tuple[list[dict], list[str]]:
+        """Returns (successful_results, permanently_failed_ids)."""
+        results = {}
+        non_retryable_failures = set()
+        pending_ids = list(message_ids)
+        batch_size = 10
+        inter_batch_delay = 2.0
 
-            def _callback(request_id, response, exception, idx=None):
-                if exception:
-                    logger.warning("[GmailClient] batch_get error for index %s: %s", idx, exception)
-                else:
-                    chunk_results[idx] = response
+        for attempt in range(max_retries + 1):
+            if not pending_ids:
+                break
 
-            for j, mid in enumerate(chunk):
-                batch.add(
-                    self.service.users().messages().get(userId="me", id=mid, format=format),
-                    callback=lambda req_id, resp, exc, idx=j: _callback(req_id, resp, exc, idx),
-                )
-            batch.execute()
-            results.extend([r for r in chunk_results if r is not None])
-        return results
+            rate_limited_ids = []
+            for i in range(0, len(pending_ids), batch_size):
+                chunk = pending_ids[i : i + batch_size]
+                batch = self.service.new_batch_http_request()
+
+                def _callback(request_id, response, exception, mid=None):
+                    if exception:
+                        status = getattr(getattr(exception, "resp", None), "status", None)
+                        if isinstance(exception, HttpError) and status in (429, 403):
+                            rate_limited_ids.append(mid)
+                        else:
+                            non_retryable_failures.add(mid)
+                            logger.warning("[GmailClient] permanent error for %s (status=%s): %s", mid, status, exception)
+                    else:
+                        results[mid] = response
+
+                for mid in chunk:
+                    batch.add(
+                        self.service.users().messages().get(userId="me", id=mid, format=format),
+                        callback=lambda req_id, resp, exc, m=mid: _callback(req_id, resp, exc, m),
+                    )
+                batch.execute()
+
+                if i + batch_size < len(pending_ids):
+                    time.sleep(inter_batch_delay)
+
+            if not rate_limited_ids:
+                break
+
+            pending_ids = rate_limited_ids
+            backoff = min(2 ** (attempt + 1), 64) + random.uniform(0, 2)
+            logger.info(
+                "[GmailClient] %d messages rate-limited, retrying in %.1fs (attempt %d/%d)",
+                len(rate_limited_ids), backoff, attempt + 1, max_retries,
+            )
+            time.sleep(backoff)
+        else:
+            # Loop exhausted all retries without breaking — remaining pending_ids are failures
+            if pending_ids:
+                logger.warning("[GmailClient] %d messages still rate-limited after %d retries", len(pending_ids), max_retries)
+                non_retryable_failures.update(pending_ids)
+
+        failed = [mid for mid in message_ids if mid in non_retryable_failures]
+        return [results[mid] for mid in message_ids if mid in results], failed
+
+    def get_history_id(self) -> str:
+        return self.service.users().getProfile(userId="me").execute().get("historyId", "")
+
+    @staticmethod
+    def parse_message_metadata(raw: dict) -> dict:
+        label_ids = raw.get("labelIds", [])
+        headers = GmailClient.parse_headers(raw.get("payload", {}).get("headers", []))
+        return {
+            "gmail_id": raw["id"],
+            "label_ids": label_ids,
+            "is_read": "UNREAD" not in label_ids,
+            "is_starred": "STARRED" in label_ids,
+            "snippet": raw.get("snippet", ""),
+            "history_id": raw.get("historyId", ""),
+        }
 
     def modify_message(self, message_id: str, add_labels: list[str] | None = None, remove_labels: list[str] | None = None) -> dict:
         body = {

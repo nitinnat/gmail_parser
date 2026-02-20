@@ -1,6 +1,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
+from gmail_parser.categorizer import categorize
 from gmail_parser.client import GmailClient
 from gmail_parser.config import settings
 from gmail_parser.embeddings import EmbeddingModel
@@ -62,28 +63,54 @@ class IngestionPipeline:
     def full_sync(
         self,
         query: str = "",
-        max_emails: int = 500,
+        max_emails: int = 100000,
         label_ids: list[str] | None = None,
         after: datetime | None = None,
         before: datetime | None = None,
         newer_than: str | None = None,
         older_than: str | None = None,
         days_ago: int | None = None,
+        progress_callback=None,
     ) -> int:
         query = self.build_time_query(query, after, before, newer_than, older_than, days_ago)
         logger.info("[IngestionPipeline] starting full sync (max=%d, query='%s')", max_emails, query)
         batch_size = settings.sync_batch_size
 
         message_stubs = self._client.list_messages(query=query, label_ids=label_ids, max_results=max_emails)
-        logger.info("[IngestionPipeline] found %d messages to sync", len(message_stubs))
+        total_messages = len(message_stubs)
+        logger.info("[IngestionPipeline] found %d messages to sync", total_messages)
+        if progress_callback:
+            progress_callback(0, total_messages)
 
         # Build label gmail_id -> name mapping for pipe-delimited labels
         label_map = {l["gmail_id"]: l["name"] for l in self._store.get_labels()}
 
         total_synced = 0
-        for i in range(0, len(message_stubs), batch_size):
+        total_failed = 0
+        all_failed_ids = []
+        for i in range(0, total_messages, batch_size):
             chunk_ids = [m["id"] for m in message_stubs[i : i + batch_size]]
-            raw_messages = self._client.batch_get_messages(chunk_ids)
+            existing = self._store.get_existing_ids(chunk_ids)
+            new_ids = [mid for mid in chunk_ids if mid not in existing]
+            if existing:
+                logger.info(
+                    "[IngestionPipeline] batch %d-%d: %d already stored, fetching %d new",
+                    i, i + len(chunk_ids), len(existing), len(new_ids),
+                )
+            if not new_ids:
+                total_synced += len(chunk_ids)
+                if progress_callback:
+                    progress_callback(total_synced, total_messages)
+                continue
+            raw_messages, failed_ids = self._client.batch_get_messages(new_ids)
+            if failed_ids:
+                total_failed += len(failed_ids)
+                all_failed_ids.extend(failed_ids)
+                logger.warning(
+                    "[IngestionPipeline] %d/%d messages failed in batch %d-%d",
+                    len(failed_ids), len(chunk_ids), i, i + len(chunk_ids),
+                )
+
             parsed = [GmailClient.parse_message(m) for m in raw_messages]
 
             texts = [
@@ -101,14 +128,43 @@ class IngestionPipeline:
                 metadatas.append(self._build_metadata(p, label_map))
 
             self._store.upsert_emails_batch(ids, documents, embeddings, metadatas)
-            total_synced += len(parsed)
-            logger.info("[IngestionPipeline] synced batch %d-%d", i, i + len(chunk_ids))
+            total_synced += len(parsed) + len(existing)
+            logger.info(
+                "[IngestionPipeline] synced batch %d-%d (%d new, %d skipped, %d failed)",
+                i, i + len(chunk_ids), len(parsed), len(existing), len(failed_ids),
+            )
+            if progress_callback:
+                progress_callback(total_synced, total_messages)
 
-        self._update_sync_state(total_synced)
-        logger.info("[IngestionPipeline] full sync complete: %d emails", total_synced)
+        # Deletion detection: remove emails that were deleted in Gmail within this sync's date range
+        gmail_ids_set = {m["id"] for m in message_stubs}
+        time_where: dict | None = None
+        if days_ago is not None:
+            after_ts = int((datetime.now(UTC) - timedelta(days=days_ago)).timestamp())
+            time_where = {"date_timestamp": {"$gte": after_ts}}
+        local_ids_in_range = set(self._store.get_all_ids(time_where))
+        deleted_ids = local_ids_in_range - gmail_ids_set
+        if deleted_ids:
+            self._store.delete_emails(list(deleted_ids))
+            logger.info("[IngestionPipeline] removed %d emails deleted in Gmail", len(deleted_ids))
+
+        # Store current historyId so incremental_sync can pick up from here
+        try:
+            current_history_id = self._client.get_history_id()
+        except Exception:
+            current_history_id = ""
+
+        self._update_sync_state(total_synced, current_history_id)
+        if total_failed:
+            logger.warning(
+                "[IngestionPipeline] full sync complete: %d emails synced, %d FAILED (ids: %s)",
+                total_synced, total_failed, all_failed_ids,
+            )
+        else:
+            logger.info("[IngestionPipeline] full sync complete: %d emails, 0 failures", total_synced)
         return total_synced
 
-    def incremental_sync(self) -> int:
+    def incremental_sync(self) -> dict:
         state = self._store.get_sync_state()
         if not state or not state.get("last_history_id"):
             raise SyncError("No previous sync state found. Run full_sync first.")
@@ -117,31 +173,80 @@ class IngestionPipeline:
         try:
             history = self._client.list_history(state["last_history_id"])
         except Exception as e:
-            raise SyncError(f"History API failed: {e}") from e
+            raise SyncError(f"History API failed (historyId may be too old — run full_sync): {e}") from e
 
-        added_ids = set()
+        added_ids: set[str] = set()
+        deleted_ids: set[str] = set()
+        label_changed_ids: set[str] = set()
+
         for record in history:
             for msg in record.get("messagesAdded", []):
                 added_ids.add(msg["message"]["id"])
+            for msg in record.get("messagesDeleted", []):
+                deleted_ids.add(msg["message"]["id"])
+            for msg in record.get("labelsAdded", []):
+                label_changed_ids.add(msg["message"]["id"])
+            for msg in record.get("labelsRemoved", []):
+                label_changed_ids.add(msg["message"]["id"])
 
-        if not added_ids:
-            logger.info("[IngestionPipeline] no new messages since last sync")
-            return 0
+        # Remove emails deleted in Gmail (skip any that were just added in this batch)
+        to_delete = list(deleted_ids - added_ids)
+        if to_delete:
+            self._store.delete_emails(to_delete)
+            logger.info("[IngestionPipeline] incremental: deleted %d emails", len(to_delete))
 
-        label_map = {l["gmail_id"]: l["name"] for l in self._store.get_labels()}
-        raw_messages = self._client.batch_get_messages(list(added_ids))
-        parsed = [GmailClient.parse_message(m) for m in raw_messages]
-        texts = [EmbeddingModel.prepare_email_text(p["subject"], p["body_text"], p["sender"]) for p in parsed]
-        embeddings = self._embedding.encode_batch(texts)
+        # Refresh metadata (labels/read/starred) for label-changed emails
+        refresh_ids = list(label_changed_ids - added_ids - deleted_ids)
+        refreshed = 0
+        if refresh_ids:
+            label_map = {l["gmail_id"]: l["name"] for l in self._store.get_labels()}
+            meta_messages, _ = self._client.batch_get_messages(refresh_ids, format="metadata")
+            update_ids = []
+            update_metas = []
+            for raw in meta_messages:
+                p = GmailClient.parse_message_metadata(raw)
+                label_names = [label_map.get(lid, lid) for lid in p["label_ids"]]
+                labels_str = "|" + "|".join(label_names) + "|" if label_names else ""
+                update_ids.append(p["gmail_id"])
+                update_metas.append({
+                    "labels": labels_str,
+                    "is_read": p["is_read"],
+                    "is_starred": p["is_starred"],
+                    "history_id": p["history_id"],
+                })
+            self._store.update_metadatas_batch(update_ids, update_metas)
+            refreshed = len(update_ids)
+            logger.info("[IngestionPipeline] incremental: refreshed metadata for %d emails", refreshed)
 
-        ids = [p["gmail_id"] for p in parsed]
-        documents = [p["body_text"] or "" for p in parsed]
-        metadatas = [self._build_metadata(p, label_map) for p in parsed]
-        self._store.upsert_emails_batch(ids, documents, embeddings, metadatas)
+        # Fetch and store new emails
+        added = 0
+        if added_ids:
+            label_map = {l["gmail_id"]: l["name"] for l in self._store.get_labels()}
+            raw_messages, failed_ids = self._client.batch_get_messages(list(added_ids))
+            if failed_ids:
+                logger.warning("[IngestionPipeline] incremental: %d new emails failed to fetch", len(failed_ids))
+            parsed = [GmailClient.parse_message(m) for m in raw_messages]
+            texts = [EmbeddingModel.prepare_email_text(p["subject"], p["body_text"], p["sender"]) for p in parsed]
+            embeddings = self._embedding.encode_batch(texts)
+            self._store.upsert_emails_batch(
+                [p["gmail_id"] for p in parsed],
+                [p["body_text"] or "" for p in parsed],
+                embeddings,
+                [self._build_metadata(p, label_map) for p in parsed],
+            )
+            added = len(parsed)
 
-        self._update_sync_state(len(parsed))
-        logger.info("[IngestionPipeline] incremental sync complete: %d new emails", len(parsed))
-        return len(parsed)
+        try:
+            new_history_id = self._client.get_history_id()
+        except Exception:
+            new_history_id = state["last_history_id"]
+
+        self._update_sync_state(added, new_history_id)
+        logger.info(
+            "[IngestionPipeline] incremental sync complete: +%d added, -%d deleted, %d metadata refreshed",
+            added, len(to_delete), refreshed,
+        )
+        return {"added": added, "deleted": len(to_delete), "refreshed": refreshed}
 
     def reindex_embeddings(self, batch_size: int = 100) -> int:
         logger.info("[IngestionPipeline] reindexing all embeddings")
@@ -170,7 +275,7 @@ class IngestionPipeline:
         recipients = parsed.get("recipients", {})
         date = parsed.get("date")
 
-        return {
+        metadata = {
             "thread_id": parsed.get("thread_id", ""),
             "subject": parsed.get("subject", ""),
             "sender": parsed.get("sender", ""),
@@ -188,13 +293,16 @@ class IngestionPipeline:
             "labels": labels_str,
             "history_id": parsed.get("history_id", ""),
             "size_estimate": parsed.get("size_estimate", 0),
+            "list_unsubscribe": parsed.get("raw_headers", {}).get("List-Unsubscribe", ""),
         }
+        metadata["category"] = categorize(metadata)
+        return metadata
 
-    def _update_sync_state(self, count: int):
+    def _update_sync_state(self, count: int, history_id: str = ""):
         state = self._store.get_sync_state()
         prev_count = state.get("total_emails_synced", 0) if state else 0
         self._store.update_sync_state({
-            "last_history_id": "",
+            "last_history_id": history_id,
             "last_full_sync": datetime.now(UTC).isoformat(),
             "total_emails_synced": prev_count + count,
         })

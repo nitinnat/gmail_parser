@@ -61,10 +61,31 @@ class EmailStore:
         return self._emails.get(**kwargs)
 
     def get_all_emails(self, include: list[str] | None = None) -> dict:
-        return self._emails.get(include=include or ["metadatas"])
+        return self._emails.get(include=include or ["metadatas"], limit=self._emails.count())
 
     def count(self) -> int:
         return self._emails.count()
+
+    def update_metadatas_batch(self, ids: list[str], metadatas: list[dict]):
+        batch_size = 500
+        for i in range(0, len(ids), batch_size):
+            self._emails.update(
+                ids=ids[i : i + batch_size],
+                metadatas=metadatas[i : i + batch_size],
+            )
+
+    def get_all_ids(self, where: dict | None = None) -> list[str]:
+        kwargs: dict = {"include": [], "limit": self._emails.count()}
+        if where:
+            kwargs["where"] = where
+        return self._emails.get(**kwargs)["ids"]
+
+    def get_existing_ids(self, ids: list[str]) -> set[str]:
+        result = self._emails.get(ids=ids, include=[])
+        return set(result["ids"])
+
+    def delete_emails(self, ids: list[str]):
+        self._emails.delete(ids=ids)
 
     # --- Labels ---
 

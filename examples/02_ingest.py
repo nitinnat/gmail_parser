@@ -3,6 +3,7 @@ Ingest emails with time-based filters.
 
 Usage:
     poetry run python examples/02_ingest.py                  # last 7 days (default)
+    poetry run python examples/02_ingest.py --all            # all emails (no date filter)
     poetry run python examples/02_ingest.py --days 30        # last 30 days
     poetry run python examples/02_ingest.py --days 90        # last 3 months
     poetry run python examples/02_ingest.py --days 365       # last year
@@ -21,9 +22,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest Gmail emails")
+    parser.add_argument("--all", action="store_true", help="Ingest all emails with no date filter")
     parser.add_argument("--days", type=int, default=7, help="Ingest emails from the last N days (default: 7)")
     parser.add_argument("--newer", type=str, help="Gmail relative time, e.g. '30d', '2m', '1y'")
-    parser.add_argument("--max", type=int, default=200, help="Max emails to ingest (default: 200)")
+    parser.add_argument("--max", type=int, default=100000, help="Max emails to ingest (default: 100000)")
     parser.add_argument("--query", type=str, default="", help="Additional Gmail search query")
     args = parser.parse_args()
 
@@ -33,7 +35,9 @@ if __name__ == "__main__":
     pipeline.sync_labels()
 
     kwargs = {"query": args.query, "max_emails": args.max}
-    if args.newer:
+    if getattr(args, "all"):
+        print("Ingesting ALL emails (no date filter)...")
+    elif args.newer:
         kwargs["newer_than"] = args.newer
         print(f"Ingesting emails from the last {args.newer}...")
     else:

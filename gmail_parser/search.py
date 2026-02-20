@@ -1,9 +1,16 @@
 import csv
 import logging
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+_SUBSCRIPTION_RE = re.compile(
+    r"noreply|no-reply|newsletter|notifications?|updates?|donotreply|marketing|digest|news@",
+    re.IGNORECASE,
+)
+_SUBSCRIPTION_LABELS = frozenset({"CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_UPDATES"})
 
 from gmail_parser.embeddings import EmbeddingModel
 from gmail_parser.store import EmailStore
@@ -16,6 +23,7 @@ class SearchFilters:
     sender: str | None = None
     recipients: str | None = None
     label: str | None = None
+    category: str | None = None
     date_from: datetime | None = None
     date_to: datetime | None = None
     has_attachments: bool | None = None
@@ -180,6 +188,51 @@ class EmailSearch:
     def email_count(self) -> int:
         return self._store.count()
 
+    def get_sender_analytics(self, limit: int = 200) -> list[dict]:
+        all_emails = self._store.get_all_emails(include=["metadatas"])
+        senders: dict[str, dict] = {}
+
+        for meta in all_emails["metadatas"]:
+            sender = meta.get("sender", "")
+            if not sender:
+                continue
+            if sender not in senders:
+                senders[sender] = {"count": 0, "unread_count": 0, "last_date": "", "has_unsubscribe": False, "labels": set(), "cat_counter": Counter()}
+            s = senders[sender]
+            s["count"] += 1
+            if not meta.get("is_read", True):
+                s["unread_count"] += 1
+            date_iso = meta.get("date_iso", "")
+            if date_iso > s["last_date"]:
+                s["last_date"] = date_iso
+            if meta.get("list_unsubscribe", ""):
+                s["has_unsubscribe"] = True
+            for lbl in meta.get("labels", "").strip("|").split("|"):
+                if lbl:
+                    s["labels"].add(lbl)
+            s["cat_counter"][meta.get("category", "Other")] += 1
+
+        results = []
+        for sender, s in senders.items():
+            is_subscription = (
+                s["has_unsubscribe"]
+                or bool(_SUBSCRIPTION_RE.search(sender))
+                or bool(s["labels"] & _SUBSCRIPTION_LABELS)
+                or s["count"] >= 5
+            )
+            results.append({
+                "sender": sender,
+                "count": s["count"],
+                "unread_count": s["unread_count"],
+                "last_date": s["last_date"],
+                "has_list_unsubscribe": s["has_unsubscribe"],
+                "is_subscription": is_subscription,
+                "category": s["cat_counter"].most_common(1)[0][0] if s["cat_counter"] else "Other",
+            })
+
+        results.sort(key=lambda x: x["count"], reverse=True)
+        return results[:limit]
+
     # --- Export ---
 
     CSV_COLUMNS = ["date", "sender", "subject", "recipients_to", "recipients_cc", "labels", "is_read", "is_starred", "has_attachments", "snippet", "gmail_id"]
@@ -237,6 +290,8 @@ class EmailSearch:
             conditions.append({"subject": {"$contains": filters.subject_contains}})
         if filters.label:
             conditions.append({"labels": {"$contains": f"|{filters.label}|"}})
+        if filters.category:
+            conditions.append({"category": filters.category})
         if filters.recipients:
             conditions.append({"recipients_to": {"$contains": filters.recipients}})
 
@@ -265,5 +320,7 @@ class EmailSearch:
         if filters.is_starred is not None and metadata.get("is_starred") != filters.is_starred:
             return False
         if filters.subject_contains and filters.subject_contains.lower() not in metadata.get("subject", "").lower():
+            return False
+        if filters.category and metadata.get("category") != filters.category:
             return False
         return True

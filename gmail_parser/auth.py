@@ -12,7 +12,7 @@ from gmail_parser.exceptions import AuthenticationError
 logger = logging.getLogger(__name__)
 
 SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
 ]
 
 

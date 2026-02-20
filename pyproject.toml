@@ -18,6 +18,8 @@ google-auth-oauthlib = "^0.8"
 sentence-transformers = "^3.0"
 beautifulsoup4 = "^4.12"
 posthog = ">=2.4.0,<4.0.0"
+fastapi = "^0.129.0"
+uvicorn = {extras = ["standard"], version = "^0.41.0"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"

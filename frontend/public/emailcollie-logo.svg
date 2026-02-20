@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <path id="topArc"    d="M 16,100 A 84,84 0 0,0 184,100"/>
+    <path id="bottomArc" d="M  7,100 A 93,93 0 0,1 193,100"/>
+  </defs>
+
+  <!-- Badge background -->
+  <circle cx="100" cy="100" r="100" fill="white"/>
+  <!-- Outer ring -->
+  <circle cx="100" cy="100" r="97" fill="none" stroke="#111" stroke-width="5"/>
+  <!-- Inner decorative ring -->
+  <circle cx="100" cy="100" r="82" fill="none" stroke="#111" stroke-width="1.5"/>
+
+  <!-- White ruff / chest -->
+  <path d="M 72,116 Q 86,136 100,138 Q 114,136 128,116 Q 114,128 100,130 Q 86,128 72,116 Z" fill="white"/>
+
+  <!-- Left ear -->
+  <path d="M 67,83 C 61,66 64,46 74,49 C 81,51 84,67 81,81 Z" fill="#111"/>
+  <!-- Right ear -->
+  <path d="M 133,83 C 139,66 136,46 126,49 C 119,51 116,67 119,81 Z" fill="#111"/>
+
+  <!-- Head -->
+  <ellipse cx="100" cy="84" rx="38" ry="34" fill="#111"/>
+
+  <!-- White blaze -->
+  <path d="M 100,52
+           C 94,58 89,69 89,79
+           C 89,88 92,94 97,98
+           C 98,99.5 100,100 100,100
+           C 100,100 102,99.5 103,98
+           C 108,94 111,88 111,79
+           C 111,69 106,58 100,52 Z"
+        fill="white"/>
+
+  <!-- Muzzle -->
+  <ellipse cx="100" cy="98" rx="18" ry="13" fill="#dedede"/>
+
+  <!-- Nose -->
+  <path d="M 92,91 Q 100,87 108,91 Q 108,97 100,98 Q 92,97 92,91 Z" fill="#1a1a1a"/>
+  <ellipse cx="96"  cy="94" rx="2.2" ry="1.4" fill="#333"/>
+  <ellipse cx="104" cy="94" rx="2.2" ry="1.4" fill="#333"/>
+
+  <!-- Left eye -->
+  <circle cx="84"  cy="80" r="9.5" fill="#222"/>
+  <circle cx="84"  cy="80" r="7.5" fill="#8B5534"/>
+  <circle cx="84"  cy="80" r="5"   fill="#111"/>
+  <circle cx="82"  cy="78" r="2"   fill="white"/>
+
+  <!-- Right eye -->
+  <circle cx="116" cy="80" r="9.5" fill="#222"/>
+  <circle cx="116" cy="80" r="7.5" fill="#8B5534"/>
+  <circle cx="116" cy="80" r="5"   fill="#111"/>
+  <circle cx="114" cy="78" r="2"   fill="white"/>
+
+  <!-- Mouth -->
+  <path d="M 92,106 Q 100,111 108,106" fill="none" stroke="#bbb" stroke-width="1.2" stroke-linecap="round"/>
+
+  <!-- Gmail envelope -->
+  <rect x="73" y="109" width="54" height="38" rx="3" fill="#EA4335"/>
+  <!-- White M-fold flap -->
+  <path d="M 73,109 L 100,129 L 127,109 Z" fill="white"/>
+  <!-- Bottom fold lines -->
+  <polyline points="73,147 88,133 100,142 112,133 127,147"
+            fill="none" stroke="white" stroke-width="1.5" stroke-linejoin="round" opacity="0.7"/>
+
+  <!-- "EmailCollie" along top arc -->
+  <text font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif"
+        font-size="13" font-weight="900" fill="#111" letter-spacing="0.6">
+    <textPath href="#topArc" startOffset="50%" text-anchor="middle">EmailCollie</textPath>
+  </text>
+
+  <!-- "Herding Your Inbox" along bottom arc -->
+  <text font-family="Arial, Helvetica, sans-serif"
+        font-size="10.5" font-weight="700" fill="#111" letter-spacing="0.4">
+    <textPath href="#bottomArc" startOffset="50%" text-anchor="middle">Herding Your Inbox</textPath>
+  </text>
+</svg>
