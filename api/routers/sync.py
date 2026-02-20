@@ -24,7 +24,7 @@ _state = {
     "is_syncing": False,
     "synced": 0,
     "total": 0,
-    "events": [],       # rolling list of {"ts", "msg"} dicts
+    "events": [],  # rolling list of {"ts", "msg"} dicts
     "error": None,
 }
 _lock = threading.Lock()
@@ -47,9 +47,14 @@ def _auto_sync_loop():
         with _lock:
             if not _auto_sync["enabled"] or _state["is_syncing"]:
                 continue
-            if _auto_sync["next_run"] is None or datetime.now(UTC).timestamp() < _auto_sync["next_run"]:
+            if (
+                _auto_sync["next_run"] is None
+                or datetime.now(UTC).timestamp() < _auto_sync["next_run"]
+            ):
                 continue
-            _auto_sync["next_run"] = datetime.now(UTC).timestamp() + _auto_sync["interval_hours"] * 3600
+            _auto_sync["next_run"] = (
+                datetime.now(UTC).timestamp() + _auto_sync["interval_hours"] * 3600
+            )
         logger.info("[auto_sync] triggering scheduled incremental sync")
         threading.Thread(target=_run_incremental, daemon=True).start()
 
@@ -65,25 +70,43 @@ class SyncRequest(BaseModel):
 
 def _run_sync(req: SyncRequest):
     with _lock:
-        _state.update({"is_syncing": True, "synced": 0, "total": 0, "error": None, "events": []})
-    cache.invalidate("overview", "senders", "categories", "alerts", "eda")
+        _state.update(
+            {"is_syncing": True, "synced": 0, "total": 0, "error": None, "events": []}
+        )
+    cache.invalidate(
+        "overview",
+        "senders",
+        "categories",
+        "alerts",
+        "eda",
+        "expenses_overview",
+        "expenses_tx",
+    )
     _push_event("Sync started")
 
     def on_progress(synced: int, total: int):
         with _lock:
             _state["synced"] = synced
             _state["total"] = total
-        _push_event(f"Batch complete — {synced:,} / {total:,} emails ({int(synced/total*100) if total else 0}%)")
+        _push_event(
+            f"Batch complete — {synced:,} / {total:,} emails ({int(synced / total * 100) if total else 0}%)"
+        )
 
     try:
         pipeline = IngestionPipeline()
         _push_event("Syncing labels…")
         pipeline.sync_labels()
 
-        kwargs: dict = {"max_emails": req.max_emails, "query": req.query, "progress_callback": on_progress}
+        kwargs: dict = {
+            "max_emails": req.max_emails,
+            "query": req.query,
+            "progress_callback": on_progress,
+        }
         if req.days_ago is not None:
             kwargs["days_ago"] = req.days_ago
-            _push_event(f"Fetching message list (last {req.days_ago} days, max {req.max_emails:,})…")
+            _push_event(
+                f"Fetching message list (last {req.days_ago} days, max {req.max_emails:,})…"
+            )
         else:
             _push_event(f"Fetching message list (all mail, max {req.max_emails:,})…")
 
@@ -94,7 +117,15 @@ def _run_sync(req: SyncRequest):
             _state["error"] = str(e)
         _push_event(f"ERROR: {e}")
     finally:
-        cache.invalidate("overview", "senders", "categories", "alerts", "eda")
+        cache.invalidate(
+            "overview",
+            "senders",
+            "categories",
+            "alerts",
+            "eda",
+            "expenses_overview",
+            "expenses_tx",
+        )
         with _lock:
             _state["is_syncing"] = False
 
@@ -123,8 +154,18 @@ def start_sync(req: SyncRequest):
 
 def _run_incremental():
     with _lock:
-        _state.update({"is_syncing": True, "synced": 0, "total": 0, "error": None, "events": []})
-    cache.invalidate("overview", "senders", "categories", "alerts", "eda")
+        _state.update(
+            {"is_syncing": True, "synced": 0, "total": 0, "error": None, "events": []}
+        )
+    cache.invalidate(
+        "overview",
+        "senders",
+        "categories",
+        "alerts",
+        "eda",
+        "expenses_overview",
+        "expenses_tx",
+    )
     _push_event("Incremental sync started")
     try:
         pipeline = IngestionPipeline()
@@ -138,7 +179,15 @@ def _run_incremental():
             _state["error"] = str(e)
         _push_event(f"ERROR: {e}")
     finally:
-        cache.invalidate("overview", "senders", "categories", "alerts", "eda")
+        cache.invalidate(
+            "overview",
+            "senders",
+            "categories",
+            "alerts",
+            "eda",
+            "expenses_overview",
+            "expenses_tx",
+        )
         with _lock:
             _state["is_syncing"] = False
 
@@ -191,7 +240,15 @@ def categorize_emails():
     updated = [{"category": do_categorize(m)} for m in metadatas]
     store.update_metadatas_batch(ids, updated)
     counts = Counter(m["category"] for m in updated)
-    cache.invalidate("overview", "categories", "senders", "alerts", "eda")
+    cache.invalidate(
+        "overview",
+        "categories",
+        "senders",
+        "alerts",
+        "eda",
+        "expenses_overview",
+        "expenses_tx",
+    )
     logger.info("[categorize_emails] categorized %d emails", len(ids))
     return {"updated": len(ids), "categories": dict(counts)}
 
@@ -218,7 +275,9 @@ def get_logs(after: str | None = None):
                 level = "WARNING"
             elif stripped.startswith("ERROR"):
                 level = "ERROR"
-            script_lines.append({"ts": None, "level": level, "line": stripped, "source": "script"})
+            script_lines.append(
+                {"ts": None, "level": level, "line": stripped, "source": "script"}
+            )
 
     for r in api_logs:
         r.setdefault("source", "api")
@@ -236,7 +295,9 @@ def _auto_sync_response():
     return {
         "enabled": state["enabled"],
         "interval_hours": state["interval_hours"],
-        "next_run": datetime.fromtimestamp(state["next_run"], UTC).isoformat() if state["next_run"] else None,
+        "next_run": datetime.fromtimestamp(state["next_run"], UTC).isoformat()
+        if state["next_run"]
+        else None,
     }
 
 
@@ -254,7 +315,9 @@ def set_auto_sync(req: AutoSyncRequest):
     with _lock:
         _auto_sync["enabled"] = req.enabled
         if req.enabled:
-            _auto_sync["next_run"] = datetime.now(UTC).timestamp() + _auto_sync["interval_hours"] * 3600
+            _auto_sync["next_run"] = (
+                datetime.now(UTC).timestamp() + _auto_sync["interval_hours"] * 3600
+            )
         else:
             _auto_sync["next_run"] = None
     logger.info("[auto_sync] %s", "enabled" if req.enabled else "disabled")

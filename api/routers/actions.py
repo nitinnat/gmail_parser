@@ -36,7 +36,9 @@ def trash_emails(req: IdsRequest):
     client = GmailClient()
     for mid in req.ids:
         client.trash_message(mid)
-    EmailStore().delete_emails(req.ids)
+    store = EmailStore()
+    store.delete_emails(req.ids)
+    store.delete_expenses(req.ids)
     logger.info("[actions/trash] done — %d messages trashed", len(req.ids))
     return {"trashed": len(req.ids)}
 
@@ -56,8 +58,17 @@ def mark_read(req: IdsRequest):
 @router.post("/label")
 def apply_label(req: LabelRequest):
     if not req.confirm:
-        return {**_PREVIEW, "would_label": len(req.ids), "label_name": req.label_name, "ids": req.ids}
-    logger.info("[actions/label] applying label '%s' to %d messages", req.label_name, len(req.ids))
+        return {
+            **_PREVIEW,
+            "would_label": len(req.ids),
+            "label_name": req.label_name,
+            "ids": req.ids,
+        }
+    logger.info(
+        "[actions/label] applying label '%s' to %d messages",
+        req.label_name,
+        len(req.ids),
+    )
     client = GmailClient()
     labels = client.list_labels()
     label_id = next((l["id"] for l in labels if l["name"] == req.label_name), None)
@@ -76,10 +87,13 @@ def trash_sender(req: SenderRequest):
     ids = result["ids"]
     if not req.confirm:
         return {**_PREVIEW, "sender": req.sender, "would_trash": len(ids)}
-    logger.info("[actions/trash-sender] trashing %d messages from '%s'", len(ids), req.sender)
+    logger.info(
+        "[actions/trash-sender] trashing %d messages from '%s'", len(ids), req.sender
+    )
     client = GmailClient()
     for mid in ids:
         client.trash_message(mid)
     store.delete_emails(ids)
+    store.delete_expenses(ids)
     logger.info("[actions/trash-sender] done — %d trashed", len(ids))
     return {"trashed": len(ids), "sender": req.sender}

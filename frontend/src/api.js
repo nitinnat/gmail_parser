@@ -13,6 +13,10 @@ const put = (path, body) =>
   }).then((r) => r.json())
 
 export const api = {
+  auth: {
+    me: () => get('/auth/me'),
+    logout: () => post('/auth/logout', {}),
+  },
   sync: {
     status: () => get('/sync/status'),
     start: (body) => post('/sync/start', body),
@@ -33,6 +37,19 @@ export const api = {
     categories: () => get('/analytics/categories'),
     alerts: (limit = 100) => get(`/analytics/alerts?limit=${limit}`),
     eda: () => get('/analytics/eda'),
+  },
+  expenses: {
+    overview: () => get('/expenses/overview'),
+    transactions: (params) => get(`/expenses/transactions?${new URLSearchParams(params)}`),
+    getRules: () => get('/expenses/rules'),
+    setRules: (rules) => post('/expenses/rules', rules),
+    reprocess: () => post('/expenses/reprocess', {}),
+    override: (payload) => post('/expenses/override', payload),
+  },
+  rules: {
+    get: () => get('/rules'),
+    set: (rules) => post('/rules', rules),
+    run: (dry_run = true) => post('/rules/run', { dry_run }),
   },
   emails: {
     list: (params) => get(`/emails?${new URLSearchParams(params)}`),

@@ -22,6 +22,143 @@ Added `LineChart`, `Line`, `Legend` imports from recharts. Removed duplicate `fm
 
 ---
 
+## 2026-02-19: Secure Dashboard Auth + Spending + Rules
+
+### Changes
+
+**Auth (FastAPI + React)**
+- Added Google OAuth login with signed session cookies and single-email allowlist.
+- New auth router: `api/routers/auth.py` (`/api/auth/login`, `/callback`, `/me`, `/logout`).
+- Session middleware configured in `api/main.py`; frontend guarded via `frontend/src/AuthGate.jsx` and `frontend/src/views/Login.jsx`.
+- Local dev support for HTTP callbacks (`OAUTHLIB_INSECURE_TRANSPORT=1`) and relaxed scope mismatch handling.
+- Auto-generates session secret on first run and persists under `<chroma_persist_dir>/dashboard_session_secret.txt`.
+
+**Spending dashboard**
+- Added expense extraction module `gmail_parser/expenses.py` (regex-based amounts + merchant hints).
+- New `expenses` ChromaDB collection via `gmail_parser/store.py` with CRUD helpers.
+- New API router `api/routers/expenses.py` with rules, reprocess, overrides, transactions, and overview analytics.
+- New UI at `/spending` with totals, trends, top categories/merchants, and rules editor (`frontend/src/views/Spending.jsx`).
+- Rules stored at `<chroma_persist_dir>/expense_rules.json`.
+
+**Inbox automation rules**
+- Added `api/routers/rules.py` with sender/keyword/label triggers and actions (mark-read, trash, label).
+- Rules UI at `/rules` (`frontend/src/views/Rules.jsx`) with preview and run.
+- Rules stored at `<chroma_persist_dir>/inbox_rules.json`.
+
+**Sync + cleanup integration**
+- Deleting emails now deletes corresponding expenses (trash actions and sync deletions).
+- Sync cache invalidation expanded to include expense analytics.
+
+### Notes
+- OAuth callbacks expect redirect URIs that match the host you use (`localhost` vs `127.0.0.1`).
+- For production, set explicit OAuth env vars and use HTTPS-only cookies.
+
+---
+
+## 2026-02-20: Spending — Merchant Extraction, UX Polish & Bug Fixes
+
+### Changes
+
+**`gmail_parser/expenses.py`** — Replaced single `_MERCHANT_RE` with `_MERCHANT_PATTERNS`, an ordered list of 4 sender-specific patterns (first match wins):
+1. **WF** — `\bMerchant detail\s+([A-Z][A-Z0-9 *&.'\-]{2,}?)` with case-sensitive lookahead to stop at lowercase "in <CITY>" or Title-cased words. Handles processor-prefixed names like `DD *MERCHANT` (asterisk in char class).
+2. **Chase** — `\btransaction with\s+(?:(?:TST|SQ|SQU|PMT)\*\s*)?...` strips known processor prefixes, lookahead handles trailing " -" and bare newline in email subjects.
+3. **Amex** — `([A-Z][A-Z0-9 &.'\-]{4,}?)\s+(?:\$|INR\s*)[0-9,]+\.[0-9]{2}\*` matches all-caps merchant name before starred amount in USD or INR format (e.g. `SOME MERCHANT $X.XX*`, `INTL MERCHANT INR X,XXX.XX*`).
+4. **Privacy.com / generic** — `\b(?:authorized at|purchased at|at)\s+([A-Za-z0-9][\w *&.'\-]{1,}?)` with `{1,}` minimum to handle short names like "WL *Steam".
+
+Root causes that were fixed: old `_MERCHANT_RE` used "at|from|merchant|store" as prepositions without context → captured "detail" (WF), single word only (Chase), "directly." (Amex boilerplate "contacting the merchant directly"), or None (Privacy.com). New patterns are sender-context-aware and non-overlapping.
+
+**`email_data/expense_rules.json`** — Updated Privacy.com rule from `senders: ["support@privacy.com"]` to `keywords: ["was authorized at"]`. Reason: sender-based rule matched ALL emails from that address including promotional "Upgrade your Privacy plan" emails that contained $4,500 plan pricing which was extracted as a spurious transaction.
+
+**`api/routers/expenses.py`** — Raised transactions endpoint `limit` cap from `le=200` to `le=1000` (frontend was requesting 500, getting 422 validation errors).
+
+**`frontend/src/views/Spending.jsx`**
+- **Column sorting**: `sort` state `{key, dir}`, all column headers are clickable buttons with ↑↓↕ indicators, applied in `displayTransactions` useMemo via generic comparator.
+- **Bar chart period filter**: clicking any bar on the monthly spending chart sets `periodFilter` (YYYY-MM string); dims other bars via Recharts `Cell` components; "×" clear button in chart header; `displayTransactions` filters transactions by `date_iso.startsWith(periodFilter)`.
+- **Reprocess stale-rules bug fix**: `reprocess()` now fetches fresh rules from the server (`api.expenses.getRules()`) before writing, so system rules in the JSON file are never overwritten by stale component state loaded at mount time. This was the root cause of the Privacy.com keyword fix being silently reverted on every Reprocess click.
+
+### Bug Root Causes Fixed
+- **"detail" as merchant (WF)**: `_MERCHANT_RE` matched "merchant" as preposition, grabbed next word "detail"; fixed with `Merchant detail` exact-phrase pattern.
+- **Single-word merchant (Chase)**: no spaces in old char class; fixed with space-inclusive class + processor-prefix stripper.
+- **"directly." as merchant (Amex)**: old regex matched "merchant" in footer boilerplate "contacting the merchant directly"; fixed by removing generic "merchant" preposition and using Amex's starred-amount anchor.
+- **Privacy.com $4,500 false positive**: sender-based rule matched promo emails; switched to keyword `"was authorized at"` which only appears in actual authorization emails.
+- **Rules JSON silently reverted on Reprocess**: React component read rules from state (populated at mount), so clicking Reprocess would overwrite the JSON with old values every time; fixed by fetching current server state first.
+- **INR transactions extracted as USD**: Amex pattern only matched `\$` prefix, missing international purchases with `MERCHANT INR X,XXX.00*` format; extended to `(?:\$|INR\s*)`.
+
+---
+
+## 2026-02-20: Spending — Keyword-Based Charge Detection + Extraction Fixes
+
+### Analysis
+Analyzed Money-category emails across all senders to identify which actually contain per-transaction charge data:
+- **`no.reply.alerts@chase.com`**: sends both balance alerts ("Your Amazon Visa balance is $X") and transaction alerts ("You made a $X.XX transaction with MERCHANT"). Amount is in the SUBJECT for transaction alerts.
+- **`AmericanExpress@welcome.americanexpress.com`**: "Large Purchase Approved" emails have format "MERCHANT $X.XX*" after a threshold notice "more than $1.00". Weekly snapshots ("Here's your weekly account snapshot") are NOT charges.
+- **`alerts@notify.wellsfargo.com`**: sends balance updates, statements, Zelle transfers, AND "You made a credit card purchase of $X" alerts. Only the credit card purchase subjects are charges.
+- **`support@privacy.com`**: ALL emails are charge authorizations ("$X.XX was authorized at MERCHANT"). Most reliable sender.
+- **`nerdwallet@mail.nerdwallet.com`**, **`venmo@email.venmo.com`**, **`americanexpress@member.americanexpress.com`**, **`no_reply@mcmap.chase.com`**: marketing/rewards, NOT charges.
+
+### Changes
+
+**`gmail_parser/expenses.py`**
+- Added `_THRESHOLD_CONTEXT_RE` to strip "more than $X" / "over $X" phrases before amount extraction, fixing Amex emails where the threshold notification amount ($1.00) appeared before the actual purchase amount.
+
+**`email_data/expense_rules.json`**
+- Replaced single category-based rule with 5 targeted rules:
+  - *Chase Transactions* (keyword: "you made a $") — matches transaction alerts, excludes balance alerts
+  - *Privacy.com* (sender: support@privacy.com) — all emails are charges
+  - *Amex Large Purchases* (keyword: "large purchase approved") — matches purchase alerts, excludes weekly snapshots
+  - *WF Credit Card* (keyword: "credit card purchase of") — matches credit card purchase emails, excludes balance/statement/Zelle
+  - *Custom Senders* (empty, user-managed) — for adding new card alert senders
+- System rules marked with `"system": true` so UI can distinguish them from user-managed senders.
+
+**`api/routers/expenses.py`**
+- Added `system: bool = False` field to `ExpenseRule` model.
+- Updated `_load_rules()` default to the new 5-rule structure.
+
+**`frontend/src/views/Spending.jsx`**
+- Replaced category chip + sender UI with two-section Sources panel:
+  - *Detected*: read-only chips showing system rule names (auto-configured based on email analysis)
+  - *Custom Senders*: editable tags + autocomplete for adding new card alert senders
+- Reprocess now preserves system rules and only updates the "Custom Senders" rule (no longer overwrites all rules with a single category-based rule).
+- Category chips moved to a display-only filter bar above the transactions table (no effect on reprocess).
+
+### Validation
+All 8 rule-matching test cases pass (charge emails match rules, balance/statement/snapshot emails produce no match). Amex extraction correctly returns the purchase amount instead of the $1.00 notification threshold.
+
+---
+
+## 2026-02-20: Spending UX Rework + Auth Debugging (Incomplete)
+
+### Changes
+
+**Spending UX rework**
+- Simplified the Spending page to focus on a single flow: choose categories + senders → Apply & Reprocess → view totals/transactions.
+- Removed extra inputs (labels/keywords/advanced filters) and restructured layout.
+- Added sender search and filtering by selected categories.
+- Totals and charts now computed from filtered transactions, not global totals.
+
+**Spending extraction diagnostics**
+- Reprocess now returns counts: matched emails, extracted amounts, missing amounts.
+- Status line shows those counts after reprocess to explain failures.
+
+**Category matching fix**
+- Reprocess now computes category via categorizer when metadata is missing, so “Money” matches work on older data.
+
+### Failures / Known Issues
+
+- **OAuth flow instability (localhost)**: multiple iterations were needed to align redirect URI/cookie origins and allow HTTP in dev. The flow remains fragile across `localhost` vs `127.0.0.1` and required special-casing.
+- **Spending extraction accuracy**: regex extraction did not reliably parse amounts for the user’s email formats; resulted in 0 extracted transactions after reprocess. Requires new parsing rules and real email samples for tuning.
+- **Spending UX iterations**: multiple UI rewrites introduced confusion and inconsistency before settling on a simpler flow; user feedback indicated UX was still unacceptable at time of handoff.
+
+### Files Touched
+
+- `frontend/src/views/Spending.jsx`
+- `api/routers/expenses.py`
+- `api/routers/auth.py`
+- `api/settings.py`
+- `credentials.json`
+
+---
+
 
 ## 2026-02-19: Senders Category Column + Reduced Categories + Alerts Tab
 

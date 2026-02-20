@@ -1,17 +1,25 @@
 import { NavLink } from 'react-router-dom'
+import { api } from '../api'
 
 const links = [
   { to: '/overview',       label: 'Overview',       num: '01' },
   { to: '/senders',        label: 'Senders',        num: '02' },
   { to: '/subscriptions',  label: 'Subscriptions',  num: '03' },
-  { to: '/browse',         label: 'Browse',         num: '04' },
-  { to: '/search',         label: 'Search',         num: '05' },
-  { to: '/sync',           label: 'Sync',           num: '06' },
-  { to: '/categories',     label: 'Categories',     num: '07' },
-  { to: '/alerts',         label: 'Alerts',         num: '08' },
+  { to: '/spending',       label: 'Spending',       num: '04' },
+  { to: '/browse',         label: 'Browse',         num: '05' },
+  { to: '/search',         label: 'Search',         num: '06' },
+  { to: '/sync',           label: 'Sync',           num: '07' },
+  { to: '/categories',     label: 'Categories',     num: '08' },
+  { to: '/alerts',         label: 'Alerts',         num: '09' },
+  { to: '/rules',          label: 'Rules',          num: '10' },
 ]
 
 export default function Sidebar() {
+  const logout = async () => {
+    await api.auth.logout()
+    window.location.href = '/'
+  }
+
   return (
     <div
       className="w-52 flex flex-col flex-shrink-0 border-r"
@@ -51,7 +59,14 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="mt-auto px-6 pb-6">
+      <div className="mt-auto px-6 pb-6 space-y-3">
+        <button
+          onClick={logout}
+          className="text-[10px] tracking-widest uppercase"
+          style={{ color: 'var(--base-500)' }}
+        >
+          Logout
+        </button>
         <p className="text-[10px] text-base-600">v0.2.0</p>
       </div>
     </div>

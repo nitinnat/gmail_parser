@@ -1,6 +1,6 @@
 # gmail-parser
 
-Python library for Gmail email processing with semantic search. Zero-setup -- uses ChromaDB (embedded) so no database server required.
+Python library for Gmail email processing with semantic search, plus a local dashboard (FastAPI + React) for exploration and management. Zero-setup -- uses ChromaDB (embedded) so no database server required.
 
 ## Features
 
@@ -10,11 +10,15 @@ Python library for Gmail email processing with semantic search. Zero-setup -- us
 - **Hybrid search** -- combines semantic similarity + text matching via Reciprocal Rank Fusion
 - **Metadata filtering** -- filter by sender, date, labels, read/unread, starred, attachments
 - **Time-based ingestion** -- sync emails by relative time ("last 30 days"), absolute dates, or Gmail time syntax
+- **Local dashboard** -- FastAPI backend + React UI for analytics, search, sync, and actions
+- **Spending tracker** -- rules-based expense extraction + analytics from Gmail alerts
+- **Inbox rules** -- sender/keyword/label automation with preview and run modes
 - **Zero config** -- works out of the box, no environment variables or database setup needed
 
 ## Prerequisites
 
 - Python 3.11+
+- Node.js 18+ (for the dashboard UI)
 - Google Cloud project with Gmail API enabled (free, no billing required)
 
 That's it. No PostgreSQL, no Docker, no database server.
@@ -70,10 +74,65 @@ poetry run python examples/02_ingest.py --days 30
 poetry run python examples/03_search.py "meeting notes"
 ```
 
+## Dashboard (FastAPI + React)
+
+Run the local dashboard for analytics, exploration, and actions (mark read, label, trash):
+
+```bash
+# Terminal 1 — Backend
+poetry run uvicorn api.main:app --reload --port 8000
+
+# Terminal 2 — Frontend
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173
+
+Dashboard highlights:
+- Overview with EDA explorer (domains, category trends, heatmap)
+- Senders table with inline category reassignment
+- Alerts watchlist by sender with quick mark-read
+- Sync controls: full, incremental, auto-sync toggle, and logs
+- Spending dashboard with expense rules and analytics
+- Rules page for inbox automation
+
+Spending workflow:
+- Add rules (senders/keywords/labels) on the Spending page
+- Click “Reprocess” to extract expenses from existing emails
+- Use the transactions table for ongoing review
+
+Default: a rule is created for the Gmail label `Expenses`.
+
+### Authentication (required for dashboard)
+
+The dashboard requires Google sign-in and will only allow a single email.
+Set these environment variables before running the API server:
+
+```bash
+DASHBOARD_GOOGLE_CLIENT_ID=...
+DASHBOARD_GOOGLE_CLIENT_SECRET=...
+DASHBOARD_GOOGLE_REDIRECT_URI=https://your-domain.com/api/auth/callback
+DASHBOARD_ALLOWED_EMAIL=you@example.com
+DASHBOARD_SESSION_SECRET=... # random 32+ chars
+DASHBOARD_CORS_ORIGINS=https://your-domain.com,http://localhost:5173
+```
+
+For local dev without auth (optional):
+
+```bash
+DASHBOARD_AUTH_ENABLED=false
+```
+
+Notes:
+- The dashboard expects existing OAuth setup (`examples/01_setup.py`) and a local ChromaDB store.
+- If you recently upgraded scopes to `gmail.modify`, delete `token.json` and re-run setup.
+
 ## Ingesting Emails by Time
 
 ```python
-from email_parser import IngestionPipeline
+from gmail_parser import IngestionPipeline
 from datetime import datetime
 
 pipeline = IngestionPipeline()
@@ -106,7 +165,7 @@ pipeline.full_sync(days_ago=60, query="from:boss@company.com", label_ids=["INBOX
 ## Searching Emails
 
 ```python
-from email_parser import EmailSearch, SearchFilters
+from gmail_parser import EmailSearch, SearchFilters
 from datetime import datetime
 
 search = EmailSearch()
@@ -159,7 +218,7 @@ Each script has `--help` for all options.
 ## Export
 
 ```python
-from email_parser import EmailSearch, SearchFilters
+from gmail_parser import EmailSearch, SearchFilters
 
 search = EmailSearch()
 
