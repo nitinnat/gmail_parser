@@ -13,6 +13,7 @@ export const CATEGORY_COLORS = {
   'Newsletters':          '#6b7280',
   'Personal':             '#10b981',
   'Other':                '#374151',
+  'Noise':                '#475569',
 }
 
 export const ALL_CATEGORIES = Object.keys(CATEGORY_COLORS)

@@ -18,10 +18,11 @@ SECURITY = "Security & Accounts"
 NEWSLETTERS = "Newsletters"
 PERSONAL = "Personal"
 OTHER = "Other"
+NOISE = "Noise"
 
 ALL_CATEGORIES = [
     IMMIGRATION, TAXES, HEALTH, JOBS, INVESTMENTS, MONEY,
-    TRAVEL, SHOPPING, AI_TECH, GOVERNMENT, SECURITY, NEWSLETTERS, PERSONAL, OTHER,
+    TRAVEL, SHOPPING, AI_TECH, GOVERNMENT, SECURITY, NEWSLETTERS, PERSONAL, OTHER, NOISE,
 ]
 
 # (category, sender_re, subject_re, labels_re)
@@ -110,15 +111,82 @@ _OVERRIDES: dict[str, str] = (
     json.loads(_OVERRIDES_FILE.read_text()) if _OVERRIDES_FILE.exists() else {}
 )
 
+_SUBJECT_OVERRIDES_FILE = Path(settings.chroma_persist_dir) / "subject_categories.json"
+_SUBJECT_OVERRIDES: dict[str, str] = (
+    json.loads(_SUBJECT_OVERRIDES_FILE.read_text()) if _SUBJECT_OVERRIDES_FILE.exists() else {}
+)
+
+_CUSTOM_CATS_FILE = Path(settings.chroma_persist_dir) / "custom_categories.json"
+
 
 def get_overrides() -> dict[str, str]:
     return dict(_OVERRIDES)
+
+
+def get_subject_overrides() -> dict[str, str]:
+    return dict(_SUBJECT_OVERRIDES)
+
+
+def get_custom_categories() -> list[dict]:
+    if _CUSTOM_CATS_FILE.exists():
+        return json.loads(_CUSTOM_CATS_FILE.read_text())
+    return []
+
+
+def get_all_category_names() -> list[str]:
+    return ALL_CATEGORIES + [c["name"] for c in get_custom_categories()]
 
 
 def set_sender_category(sender: str, category: str) -> None:
     _OVERRIDES[sender] = category
     _OVERRIDES_FILE.parent.mkdir(parents=True, exist_ok=True)
     _OVERRIDES_FILE.write_text(json.dumps(_OVERRIDES, indent=2, sort_keys=True))
+
+
+def remove_sender_override(sender: str) -> None:
+    if sender in _OVERRIDES:
+        del _OVERRIDES[sender]
+        _OVERRIDES_FILE.write_text(json.dumps(_OVERRIDES, indent=2, sort_keys=True))
+
+
+def set_subject_category(subject: str, category: str) -> None:
+    _SUBJECT_OVERRIDES[subject] = category
+    _SUBJECT_OVERRIDES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _SUBJECT_OVERRIDES_FILE.write_text(json.dumps(_SUBJECT_OVERRIDES, indent=2, sort_keys=True))
+
+
+def remove_subject_override(subject: str) -> None:
+    if subject in _SUBJECT_OVERRIDES:
+        del _SUBJECT_OVERRIDES[subject]
+        _SUBJECT_OVERRIDES_FILE.write_text(json.dumps(_SUBJECT_OVERRIDES, indent=2, sort_keys=True))
+
+
+def _save_custom_categories(cats: list[dict]) -> None:
+    _CUSTOM_CATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CUSTOM_CATS_FILE.write_text(json.dumps(cats, indent=2))
+
+
+def add_custom_category(name: str, color: str) -> list[dict]:
+    cats = get_custom_categories()
+    cats.append({"name": name, "color": color})
+    _save_custom_categories(cats)
+    return cats
+
+
+def rename_custom_category(old_name: str, new_name: str) -> list[dict]:
+    cats = get_custom_categories()
+    for c in cats:
+        if c["name"] == old_name:
+            c["name"] = new_name
+            break
+    _save_custom_categories(cats)
+    return cats
+
+
+def delete_custom_category(name: str) -> list[dict]:
+    cats = [c for c in get_custom_categories() if c["name"] != name]
+    _save_custom_categories(cats)
+    return cats
 
 
 def categorize(metadata: dict) -> str:
@@ -128,6 +196,9 @@ def categorize(metadata: dict) -> str:
         return _OVERRIDES[sender]
 
     subject = metadata.get("subject", "")
+
+    if subject in _SUBJECT_OVERRIDES:
+        return _SUBJECT_OVERRIDES[subject]
     labels = metadata.get("labels", "")
     list_unsubscribe = metadata.get("list_unsubscribe", "")
 

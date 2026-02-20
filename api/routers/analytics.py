@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query
 
 from api import cache
 from api.routers.alert_rules import load_rules
-from gmail_parser.categorizer import ALL_CATEGORIES
+from gmail_parser.categorizer import ALL_CATEGORIES, NOISE
 from gmail_parser.search import EmailSearch
 from gmail_parser.store import EmailStore
 
@@ -47,7 +47,9 @@ def overview():
             except ValueError:
                 pass
 
-        cat_counter[m.get("category", "Other")] += 1
+        cat = m.get("category", "Other")
+        if cat != NOISE:
+            cat_counter[cat] += 1
 
         sender = m.get("sender", "")
         if sender:
@@ -72,7 +74,7 @@ def overview():
     )
 
     categories = sorted(
-        [{"category": cat, "count": cat_counter[cat]} for cat in ALL_CATEGORIES if cat_counter.get(cat, 0) > 0],
+        [{"category": cat, "count": cat_counter[cat]} for cat in ALL_CATEGORIES if cat_counter.get(cat, 0) > 0 and cat != NOISE],
         key=lambda x: x["count"],
         reverse=True,
     )
@@ -116,7 +118,7 @@ def get_labels():
 def get_categories():
     store = EmailStore()
     counter = Counter(m.get("category", "Other") for m in store.get_all_emails(include=["metadatas"])["metadatas"])
-    result = [{"category": cat, "count": counter[cat]} for cat in ALL_CATEGORIES if counter.get(cat, 0) > 0]
+    result = [{"category": cat, "count": counter[cat]} for cat in ALL_CATEGORIES if counter.get(cat, 0) > 0 and cat != NOISE]
     result.sort(key=lambda x: x["count"], reverse=True)
     return result
 
@@ -199,6 +201,8 @@ def get_eda():
                 pass
 
         cat = m.get("category", "Other")
+        if cat == NOISE:
+            continue
         is_read = m.get("is_read", True)
         is_starred = m.get("is_starred", False)
         has_att = m.get("has_attachments", False)

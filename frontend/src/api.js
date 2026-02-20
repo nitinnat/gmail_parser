@@ -57,7 +57,13 @@ export const api = {
   },
   categories: {
     list: () => get('/categories'),
+    custom: () => get('/categories/custom'),
     assign: (sender, category) => post('/categories/assign', { sender, category }),
+    assignSubject: (subject, category) => post('/categories/assign', { subject, category }),
+    removeOverride: (sender, subject) => post('/categories/remove-override', sender ? { sender } : { subject }),
+    create: (name, color) => post('/categories/create', { name, color }),
+    rename: (old_name, new_name) => put('/categories/rename', { old_name, new_name }),
+    delete: (name) => fetch(`/api/categories/${encodeURIComponent(name)}`, { method: 'DELETE' }).then((r) => r.json()),
   },
   alerts: {
     getRules: () => get('/alerts/rules'),

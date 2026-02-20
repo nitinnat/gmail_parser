@@ -7,11 +7,10 @@ const links = [
   { to: '/subscriptions',  label: 'Subscriptions',  num: '03' },
   { to: '/spending',       label: 'Spending',       num: '04' },
   { to: '/browse',         label: 'Browse',         num: '05' },
-  { to: '/search',         label: 'Search',         num: '06' },
-  { to: '/sync',           label: 'Sync',           num: '07' },
-  { to: '/categories',     label: 'Categories',     num: '08' },
-  { to: '/alerts',         label: 'Alerts',         num: '09' },
-  { to: '/rules',          label: 'Rules',          num: '10' },
+  { to: '/sync',           label: 'Sync',           num: '06' },
+  { to: '/categories',     label: 'Categories',     num: '07' },
+  { to: '/alerts',         label: 'Alerts',         num: '08' },
+  { to: '/rules',          label: 'Rules',          num: '09' },
 ]
 
 export default function Sidebar() {

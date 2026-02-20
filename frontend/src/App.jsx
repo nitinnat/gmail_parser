@@ -7,7 +7,6 @@ import Senders from './views/Senders'
 import Subscriptions from './views/Subscriptions'
 import Spending from './views/Spending'
 import Browse from './views/Browse'
-import Search from './views/Search'
 import SyncPage from './views/Sync'
 import Categories from './views/Categories'
 import Alerts from './views/Alerts'
@@ -25,7 +24,7 @@ function AnimatedRoutes() {
           <Route path="/subscriptions" element={<Subscriptions />} />
           <Route path="/spending" element={<Spending />} />
           <Route path="/browse" element={<Browse />} />
-          <Route path="/search" element={<Search />} />
+          <Route path="/search" element={<Navigate to="/browse" replace />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/categories" element={<Categories />} />
           <Route path="/alerts" element={<Alerts />} />
