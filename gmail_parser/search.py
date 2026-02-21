@@ -103,11 +103,19 @@ class EmailSearch:
 
     def filter_emails(self, filters: SearchFilters, limit: int = 50, offset: int = 0) -> list[dict]:
         where = self._build_where(filters)
-        result = self._store.get_emails(where=where or None, limit=limit, offset=offset)
-        results = []
-        for id_, doc, meta in zip(result["ids"], result["documents"], result["metadatas"]):
-            results.append({"id": id_, "document": doc, "metadata": meta})
-        return results
+        # Fetch all matching without limit so we can sort globally by date before paginating.
+        # ChromaDB's .get() has no ORDER BY support, so passing limit/offset directly gives
+        # arbitrary ordering (insertion order) rather than newest-first.
+        result = self._store.get_emails(where=where or None)
+        combined = sorted(
+            zip(result["ids"], result["documents"], result["metadatas"]),
+            key=lambda x: x[2].get("date_timestamp", 0),
+            reverse=True,
+        )
+        return [
+            {"id": id_, "document": doc, "metadata": meta}
+            for id_, doc, meta in combined[offset : offset + limit]
+        ]
 
     # --- Convenience queries ---
 
