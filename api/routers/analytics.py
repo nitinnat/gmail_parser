@@ -1,6 +1,6 @@
 import re
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Query
 
@@ -14,6 +14,13 @@ router = APIRouter()
 
 _SUBSCRIPTION_RE = re.compile(
     r"noreply|no-reply|newsletter|notifications?|updates?|donotreply|marketing|digest|news@",
+    re.IGNORECASE,
+)
+
+_REPLY_CATEGORIES = frozenset({"Personal", "Jobs & Recruitment"})
+_DO_CATEGORIES = frozenset({"Immigration", "Taxes", "Health & Insurance", "Security & Accounts", "Government & Services"})
+_DO_KEYWORDS_RE = re.compile(
+    r"\b(expires?d?|due|deadline|confirm|verify|action.required|urgent|remind(er)?|renew|pay(ment)?|invoice|sign|complete|submit|required|overdue|appointment|schedule|register|enroll)\b",
     re.IGNORECASE,
 )
 _SUBSCRIPTION_LABELS = frozenset({"CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_UPDATES"})
@@ -158,6 +165,46 @@ def get_alerts(limit: int = Query(500, le=2000)):
     results.sort(key=lambda x: x["date"], reverse=True)
     cache.set("alerts", results)
     return results[:limit]
+
+
+@router.get("/triage")
+def get_triage(days: int = Query(7, ge=1, le=30)):
+    cache_key = f"triage_{days}"
+    cached = cache.get(cache_key, ttl=60)
+    if cached is not None:
+        return cached
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    store = EmailStore()
+    all_emails = store.get_all_emails(include=["metadatas"])
+
+    reply, do, read = [], [], []
+    for id_, meta in zip(all_emails["ids"], all_emails["metadatas"]):
+        date_iso = meta.get("date_iso", "")
+        if not date_iso or date_iso < cutoff:
+            continue
+
+        sender = meta.get("sender", "")
+        subject = meta.get("subject", "")
+        category = meta.get("category", "Other")
+        is_read = meta.get("is_read", True)
+        is_subscription = bool(_SUBSCRIPTION_RE.search(sender))
+
+        item = {"id": id_, "subject": subject, "sender": sender, "date": date_iso, "category": category, "is_read": is_read}
+
+        if not is_subscription and (category in _REPLY_CATEGORIES or "?" in subject):
+            reply.append({**item, "bucket": "reply"})
+        elif category in _DO_CATEGORIES or bool(_DO_KEYWORDS_RE.search(subject)):
+            do.append({**item, "bucket": "do"})
+        elif not is_subscription and not is_read:
+            read.append({**item, "bucket": "read"})
+
+    for bucket in (reply, do, read):
+        bucket.sort(key=lambda x: x["date"], reverse=True)
+
+    result = {"reply": reply[:20], "do": do[:20], "read": read[:20]}
+    cache.set(cache_key, result)
+    return result
 
 
 _DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]

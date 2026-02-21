@@ -21,6 +21,16 @@ email_data/
 .DS_Store
 .claude/
 
+# OAuth credentials and private keys
+client_secret_*.json
+*.pem
+
+# Screenshots and playwright artifacts
+*.png
+*.jpg
+public/
+.playwright-mcp/
+
 # Frontend build artifacts
 node_modules/
 frontend/node_modules/

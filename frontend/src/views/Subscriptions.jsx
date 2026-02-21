@@ -73,34 +73,36 @@ export default function Subscriptions() {
           <p className="text-[11px] tracking-[0.2em] uppercase text-base-400">No subscriptions detected</p>
         </div>
       ) : (
-        <div style={{ border: '1px solid var(--border)' }}>
-          {/* Head */}
-          <div
-            className="grid text-[10px] tracking-[0.2em] uppercase text-base-400 px-4 py-2.5"
-            style={{
-              gridTemplateColumns: '32px 1fr 80px 64px 90px 80px 120px',
-              borderBottom: '1px solid var(--border)',
-              background: 'rgba(255,255,255,0.02)',
-            }}
-          >
-            <span>#</span>
-            <span>Sender</span>
-            <span className="text-right">Emails</span>
-            <span className="text-right">Unread</span>
-            <span>Last Seen</span>
-            <span>Confirmed</span>
-            <span />
-          </div>
+        <div style={{ border: '1px solid var(--border)' }} className="overflow-x-auto">
+          <div style={{ minWidth: '580px' }}>
+            {/* Head */}
+            <div
+              className="grid text-[10px] tracking-[0.2em] uppercase text-base-400 px-4 py-2.5"
+              style={{
+                gridTemplateColumns: '32px 1fr 80px 64px 90px 80px 120px',
+                borderBottom: '1px solid var(--border)',
+                background: 'rgba(255,255,255,0.02)',
+              }}
+            >
+              <span>#</span>
+              <span>Sender</span>
+              <span className="text-right">Emails</span>
+              <span className="text-right">Unread</span>
+              <span className="pl-3">Last Seen</span>
+              <span>Confirmed</span>
+              <span />
+            </div>
 
-          {senders.map((s, i) => (
-            <SubRow
-              key={s.sender}
-              s={s}
-              i={i}
-              onTrash={() => trashSender(s.sender)}
-              onView={() => navigate(`/browse?sender=${encodeURIComponent(s.sender)}`)}
-            />
-          ))}
+            {senders.map((s, i) => (
+              <SubRow
+                key={s.sender}
+                s={s}
+                i={i}
+                onTrash={() => trashSender(s.sender)}
+                onView={() => navigate(`/browse?sender=${encodeURIComponent(s.sender)}`)}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -126,7 +128,7 @@ function SubRow({ s, i, onTrash, onView }) {
       <span className={`text-right tabular-nums ${s.unread_count > 0 ? 'text-accent' : 'text-base-400'}`}>
         {s.unread_count}
       </span>
-      <span className="text-[11px] text-base-400">
+      <span className="text-[11px] text-base-400 pl-3">
         {s.last_date ? new Date(s.last_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '—'}
       </span>
       <span>

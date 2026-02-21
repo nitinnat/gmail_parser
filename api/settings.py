@@ -18,6 +18,10 @@ class DashboardSettings(BaseSettings):
     session_ttl_seconds: int = 86400
     https_only: bool = False
     cors_origins: str = "http://localhost:5173"
+    llm_provider: str = "anthropic"  # "anthropic" | "ollama"
+    llm_model: str = "claude-haiku-4-5-20251001"
+    llm_api_key: str = ""
+    llm_base_url: str = "http://localhost:11434"
 
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

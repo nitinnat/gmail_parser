@@ -1,5 +1,82 @@
 # Implementation Log -- gmail-parser
 
+## 2026-02-20: Cloudflare Tunnel Deployment, Google OAuth (Web App), Mobile UX, Triage View
+
+### Deployment: Cloudflare Tunnel + Public HTTPS
+
+Set up public access via Cloudflare Tunnel (`cloudflared`) at `https://emailcollie.nitinnataraj.com`.
+
+- **`start.sh`**: Added `--proxy-headers --forwarded-allow-ips="*"` to uvicorn so it trusts `X-Forwarded-Proto: https` from Cloudflare; sets `OAUTHLIB_RELAX_TOKEN_SCOPE=1` globally.
+- **`api/settings.py`**: Added `DASHBOARD_HTTPS_ONLY` env var (default `false`); cookie `https_only` flag respects this.
+- **`.env`**: Configures Web App OAuth client, redirect URI, allowed email, HTTPS-only flag.
+
+### Auth: Migrate to Web App Client + OAuth Fixes
+
+Previous setup used a Desktop-type OAuth client which doesn't support web redirect URIs.
+
+**Root causes debugged and fixed:**
+1. **`redirect_uri_mismatch` (cause 1)**: `DASHBOARD_GOOGLE_CLIENT_ID` was empty, code fell back to `credentials.json` (Desktop app) which has different redirect URIs. Fix: user populated `.env` with Web App credentials.
+2. **`redirect_uri_mismatch` (cause 2)**: Stale process still using old credentials after `.env` update; required restart.
+3. **`invalid_grant`**: `include_granted_scopes=true` caused Gmail scopes to appear in the authorization response; `requests_oauthlib` included them in token exchange which Google rejected. Fix: removed `include_granted_scopes`, moved `OAUTHLIB_RELAX_TOKEN_SCOPE=1` outside localhost-only block.
+
+**`api/routers/auth.py`** changes:
+- Belt-and-suspenders `http://` → `https://` rewrite for `authorization_response` (handles Cloudflare stripping HTTPS).
+- Removed `include_granted_scopes="true"` from `authorization_url()`.
+- Changed `prompt="consent"` → `prompt="select_account"`.
+- Moved `OAUTHLIB_RELAX_TOKEN_SCOPE=1` to top-level (not inside localhost branch).
+
+### Mobile UX Overhaul
+
+**`frontend/src/App.jsx`**:
+- Added `sidebarOpen` state and `logout` function.
+- Mobile top bar (`md:hidden`): hamburger button → opens sidebar drawer, app name, logout button.
+- Content padding: `p-7` → `p-4 md:p-7`.
+
+**`frontend/src/components/Sidebar.jsx`**:
+- Accepts `open` / `onClose` props.
+- Desktop: `hidden md:flex w-52` static sidebar.
+- Mobile: `md:hidden fixed inset-0 z-50` overlay drawer with backdrop; nav links call `onClose` to auto-close.
+
+**`frontend/src/components/SyncBar.jsx`**:
+- Hides non-essential info on mobile (email count, last sync date, separators, auto-sync countdown) with `hidden md:inline`.
+- Compact gap/padding: `gap-2 md:gap-5 px-4 md:px-7`.
+
+**`frontend/src/views/Subscriptions.jsx`** and **`frontend/src/views/Senders.jsx`**:
+- Wrapped table in `overflow-x-auto` div + inner `min-width` div so tables scroll horizontally on narrow screens instead of collapsing.
+
+**`frontend/src/views/Triage.jsx`** (new view):
+- Category badge: `hidden md:inline`.
+- Action buttons (Mark Read, Open ↗): `hidden md:flex`.
+- Mobile-only compact ↗ link: `md:hidden`.
+- Bucket description text: `hidden md:inline`.
+
+**`frontend/src/views/Overview.jsx`**:
+- Stat cards: `grid-cols-2 md:grid-cols-4`.
+- Insight chips: `grid-cols-2 md:grid-cols-4`.
+
+### Inbox Triage View (`/triage`)
+
+New `frontend/src/views/Triage.jsx`:
+- Three priority buckets: **Reply** (people waiting on you), **Do** (deadlines/confirmations), **Read** (unread non-subscription).
+- Day filter: 3d / 7d / 14d / 30d.
+- Per-email: subject, sender, category badge (desktop), date, Mark Read action, Gmail deep-link.
+- Mark-read updates local state optimistically.
+- Backed by `GET /api/analytics/triage?days=N` (new endpoint in `api/routers/analytics.py`).
+
+### Email Digest Endpoint
+
+New `api/routers/digest.py`:
+- `GET /api/digest/daily` — returns a structured daily digest: unread count, action items (reply/do buckets from triage), recent newsletters, subscription senders.
+- Mounted in `api/main.py`.
+
+### Auto-Sync Defaults
+
+**`api/routers/sync.py`**:
+- Changed default: `enabled=True`, `interval_hours=0.25` (15 min), `next_run = time.time() + 0.25 * 3600`.
+- Previously: disabled, 2-hour interval.
+
+---
+
 ## 2026-02-19: Analytics Explorer (EDA Charts)
 
 ### Changes

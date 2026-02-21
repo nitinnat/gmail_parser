@@ -53,35 +53,37 @@ export default function Senders() {
       {loading ? (
         <p className="text-base-400 text-[12px]">Loading<span className="blink">_</span></p>
       ) : (
-        <div style={{ border: '1px solid var(--border)' }}>
-          <div
-            className="grid text-[10px] tracking-[0.2em] uppercase text-base-400 px-4 py-2.5"
-            style={{
-              gridTemplateColumns: GRID,
-              borderBottom: '1px solid var(--border)',
-              background: 'rgba(255,255,255,0.02)',
-            }}
-          >
-            <span>#</span>
-            <span>Sender</span>
-            <span className="text-right">Emails</span>
-            <span className="text-right">Unread</span>
-            <span className="pl-3">Last Seen</span>
-            <span>Type</span>
-            <span>Category</span>
-            <span />
-          </div>
+        <div style={{ border: '1px solid var(--border)' }} className="overflow-x-auto">
+          <div style={{ minWidth: '680px' }}>
+            <div
+              className="grid text-[10px] tracking-[0.2em] uppercase text-base-400 px-4 py-2.5"
+              style={{
+                gridTemplateColumns: GRID,
+                borderBottom: '1px solid var(--border)',
+                background: 'rgba(255,255,255,0.02)',
+              }}
+            >
+              <span>#</span>
+              <span>Sender</span>
+              <span className="text-right">Emails</span>
+              <span className="text-right">Unread</span>
+              <span className="pl-3">Last Seen</span>
+              <span>Type</span>
+              <span>Category</span>
+              <span />
+            </div>
 
-          {senders.map((s, i) => (
-            <SenderRow
-              key={s.sender}
-              s={s}
-              i={i}
-              onTrash={() => trashSender(s.sender)}
-              onView={() => navigate(`/browse?sender=${encodeURIComponent(s.sender)}`)}
-              onCategoryChange={(cat) => updateCategory(s.sender, cat)}
-            />
-          ))}
+            {senders.map((s, i) => (
+              <SenderRow
+                key={s.sender}
+                s={s}
+                i={i}
+                onTrash={() => trashSender(s.sender)}
+                onView={() => navigate(`/browse?sender=${encodeURIComponent(s.sender)}`)}
+                onCategoryChange={(cat) => updateCategory(s.sender, cat)}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>

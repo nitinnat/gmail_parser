@@ -1,7 +1,10 @@
 import logging
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from api.deps import require_auth
@@ -16,6 +19,7 @@ from api.routers import (
     auth,
     expenses,
     rules,
+    digest,
 )
 from api.settings import settings
 
@@ -65,3 +69,18 @@ app.include_router(
 app.include_router(
     rules.router, prefix="/api/rules", dependencies=[Depends(require_auth)]
 )
+app.include_router(
+    digest.router, prefix="/api/digest", dependencies=[Depends(require_auth)]
+)
+
+# Serve built frontend — only when dist exists (production)
+_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+if _DIST.exists():
+    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_frontend(full_path: str):
+        file = _DIST / full_path
+        if file.is_file():
+            return FileResponse(file)
+        return FileResponse(_DIST / "index.html")

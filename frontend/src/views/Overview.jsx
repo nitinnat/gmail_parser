@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, NavLink } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   LineChart, Line, Legend,
@@ -59,9 +59,78 @@ function InsightChip({ label, value }) {
 
 const EXPLORER_TABS = ['Domains', 'Category Trends', 'Heatmap']
 
+function fmtDateShort(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function DigestPanel({ triage, summary, summarizing, onSummarize }) {
+  const total = triage.reply.length + triage.do.length + triage.read.length
+  const preview = [...triage.reply.slice(0, 2), ...triage.do.slice(0, 2), ...triage.read.slice(0, 1)]
+
+  return (
+    <div style={{ border: '1px solid var(--border)', background: 'rgba(255,255,255,0.01)' }}>
+      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex items-center gap-5">
+          <span className="text-[10px] tracking-[0.25em] uppercase text-base-400">Today's Digest</span>
+          <div className="flex items-center gap-4 text-[11px] text-base-500">
+            <span>Reply <span style={{ color: 'var(--accent)' }}>{triage.reply.length}</span></span>
+            <span>Do <span style={{ color: 'var(--warn)' }}>{triage.do.length}</span></span>
+            <span>Read <span className="text-base-300">{triage.read.length}</span></span>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={onSummarize}
+            disabled={summarizing || total === 0}
+            className="text-[10px] tracking-widest uppercase transition-colors disabled:opacity-40"
+            style={{ color: 'var(--accent)' }}
+          >
+            {summarizing ? 'Thinking…' : '✦ Summarize'}
+          </button>
+          <NavLink
+            to="/triage"
+            className="text-[10px] tracking-widest uppercase"
+            style={{ color: 'var(--base-400)' }}
+          >
+            Full triage →
+          </NavLink>
+        </div>
+      </div>
+
+      {summary ? (
+        <p className="px-5 py-4 text-[12px] leading-relaxed text-base-200">{summary}</p>
+      ) : preview.length > 0 ? (
+        <div className="divide-y" style={{ '--tw-divide-opacity': 1, borderColor: 'rgba(255,255,255,0.04)' }}>
+          {preview.map((e) => (
+            <div key={e.id} className="flex items-center gap-3 px-5 py-2.5">
+              <span
+                className="text-[9px] tracking-wider uppercase px-1.5 py-0.5 flex-shrink-0"
+                style={{
+                  color: e.bucket === 'reply' ? 'var(--accent)' : e.bucket === 'do' ? 'var(--warn)' : 'var(--base-400)',
+                  border: `1px solid ${e.bucket === 'reply' ? 'rgba(0,200,240,0.3)' : e.bucket === 'do' ? 'rgba(255,180,0,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                }}
+              >
+                {e.bucket}
+              </span>
+              <span className="flex-1 text-[12px] text-base-200 truncate">{e.subject}</span>
+              <span className="text-[10px] text-base-500 flex-shrink-0">{fmtDateShort(e.date)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="px-5 py-4 text-[11px] text-base-500">No emails need attention in the last 7 days.</p>
+      )}
+    </div>
+  )
+}
+
 export default function Overview() {
   const [data, setData] = useState(null)
   const [eda, setEda] = useState(null)
+  const [triage, setTriage] = useState(null)
+  const [summary, setSummary] = useState(null)
+  const [summarizing, setSummarizing] = useState(false)
   const [explorerTab, setExplorerTab] = useState('Domains')
   const navigate = useNavigate()
 
@@ -69,11 +138,21 @@ export default function Overview() {
     const load = () => {
       api.analytics.overview().then(setData)
       api.analytics.eda().then(setEda)
+      api.analytics.triage(7).then(setTriage)
     }
     load()
     const id = setInterval(load, 10000)
     return () => clearInterval(id)
   }, [])
+
+  const handleSummarize = async () => {
+    if (!triage) return
+    setSummarizing(true)
+    const all = [...triage.reply, ...triage.do, ...triage.read]
+    const result = await api.digest.summarize(all)
+    setSummary(result.summary)
+    setSummarizing(false)
+  }
 
   const chartData = data?.monthly_volume?.map((d) => ({ ...d, period: fmtPeriod(d.period) }))
 
@@ -90,8 +169,18 @@ export default function Overview() {
         <h2 className="font-display font-700 text-5xl text-base-50 leading-none">Overview</h2>
       </div>
 
+      {/* Digest panel */}
+      {triage && (
+        <DigestPanel
+          triage={triage}
+          summary={summary}
+          summarizing={summarizing}
+          onSummarize={handleSummarize}
+        />
+      )}
+
       {/* Stat cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Emails" value={data?.total} />
         <StatCard
           label="Unread"
@@ -104,7 +193,7 @@ export default function Overview() {
 
       {/* Insight chips */}
       {eda && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <InsightChip label="Unique Senders" value={eda.totals.unique_senders.toLocaleString()} />
           <InsightChip label="Read Rate" value={`${eda.totals.read_rate}%`} />
           <InsightChip label="Peak Day" value={peakDow.day} />

@@ -61,11 +61,11 @@ export default function SyncBar() {
 
   return (
     <div
-      className="flex items-center gap-5 px-7 py-3 border-b text-[11px] flex-shrink-0"
+      className="flex items-center gap-2 md:gap-5 px-4 md:px-7 py-3 border-b text-[11px] flex-shrink-0"
       style={{ background: '#080808', borderColor: 'var(--border)' }}
     >
       {/* Status dot */}
-      <span className="flex items-center gap-2">
+      <span className="flex items-center gap-2 flex-shrink-0">
         <span
           className={syncing ? 'spin' : ''}
           style={{
@@ -83,23 +83,23 @@ export default function SyncBar() {
         }
       </span>
 
-      <span className="text-base-400">|</span>
+      <span className="text-base-400 hidden md:inline">|</span>
 
       {status?.total_emails
-        ? <span className="text-base-300">{status.total_emails.toLocaleString()} <span className="text-base-400">emails</span></span>
-        : <span className="text-base-400">no data</span>
+        ? <span className="text-base-300 hidden md:inline">{status.total_emails.toLocaleString()} <span className="text-base-400">emails</span></span>
+        : <span className="text-base-400 hidden md:inline">no data</span>
       }
 
       {lastSync && (
         <>
-          <span className="text-base-400">|</span>
-          <span className="text-base-400">synced <span className="text-base-300">{lastSync}</span></span>
+          <span className="text-base-400 hidden md:inline">|</span>
+          <span className="text-base-400 hidden md:inline">synced <span className="text-base-300">{lastSync}</span></span>
         </>
       )}
 
-      <span className="text-base-400">|</span>
+      <span className="text-base-400 hidden md:inline">|</span>
 
-      <span className="flex items-center gap-2">
+      <span className="flex items-center gap-2 flex-shrink-0">
         <button
           onClick={toggleAutoSync}
           className="text-[10px] tracking-[0.15em] uppercase transition-colors duration-150"
@@ -108,14 +108,14 @@ export default function SyncBar() {
           auto {autoSync.enabled ? 'on' : 'off'}
         </button>
         {autoSync.enabled && countdown && (
-          <span className="text-base-400">· next <span className="text-base-400">{countdown}</span></span>
+          <span className="text-base-400 hidden md:inline">· next {countdown}</span>
         )}
       </span>
 
       <button
         onClick={startSync}
         disabled={syncing}
-        className="ml-auto px-4 py-1.5 text-[11px] tracking-widest uppercase border transition-all duration-150 disabled:opacity-40"
+        className="ml-auto px-3 md:px-4 py-1.5 text-[11px] tracking-widest uppercase border transition-all duration-150 disabled:opacity-40 flex-shrink-0"
         style={{
           borderColor: 'var(--accent)',
           color: 'var(--accent)',

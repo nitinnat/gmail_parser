@@ -2,12 +2,13 @@
 
 ## Overview
 
-gmail-parser is a local-first Gmail processing library with a FastAPI backend and React dashboard. It ingests Gmail messages via OAuth2, stores embeddings and metadata in an embedded ChromaDB, and exposes analytics, search, and actions through a JSON API consumed by the UI.
+EmailCollie is a personal Gmail management dashboard. It ingests Gmail messages via OAuth2, stores embeddings and metadata in an embedded ChromaDB, and exposes analytics, search, and actions through a JSON API consumed by a React UI. It is deployed publicly via Cloudflare Tunnel with Google OAuth login gated to a single allowed email address.
 
 Key goals:
 - Zero external infrastructure (embedded storage, local processes)
 - Fast analytics (single-pass scans + short-lived caches)
 - Safe operations (preview-first destructive actions)
+- Mobile-friendly, responsive UI
 
 ## Architecture
 
@@ -26,15 +27,24 @@ Key goals:
                        FastAPI JSON  │
                                      ▼
                                ┌───────────────┐
-                               │   API Server  │
-                               └─────┬─────────┘
+                               │   API Server  │◄── uvicorn (127.0.0.1:8000)
+                               └─────┬─────────┘    --proxy-headers
                                      │
-                          HTTP (Vite proxy)
+                          Cloudflare Tunnel (HTTPS)
                                      ▼
                                ┌───────────────┐
-                               │   React UI    │
-                               └───────────────┘
+                               │   React UI    │◄── Vite (dev) or served
+                               └───────────────┘    via Cloudflare
 ```
+
+## Deployment
+
+The application runs on a local machine exposed publicly via Cloudflare Tunnel:
+
+- `cloudflared tunnel run emailcollie` forwards `https://emailcollie.nitinnataraj.com` → `localhost:8000` for the API, and the React build is served by nginx or Vite dev server behind the same tunnel.
+- `start.sh` starts both services; `stop.sh` stops them.
+- uvicorn runs with `--proxy-headers --forwarded-allow-ips="*"` to trust Cloudflare's `X-Forwarded-Proto: https`, which is required for secure session cookies and OAuth callback URL construction.
+- `OAUTHLIB_RELAX_TOKEN_SCOPE=1` is set at process startup to suppress oauth scope-mismatch warnings.
 
 ## Components
 
@@ -51,20 +61,22 @@ Key goals:
 - `api/main.py`: FastAPI app, CORS, router registration
 - `api/cache.py`: simple in-memory TTL cache for analytics results
 - `api/routers/`:
-  - `auth`: Google OAuth login + session endpoints
-  - `sync`: sync status, full sync, incremental sync, logs, categorize
-  - `analytics`: overview, senders, subscriptions, alerts feed, EDA
+  - `auth`: Google OAuth Web App login + signed session cookies + single-email allowlist
+  - `sync`: sync status, full sync, incremental sync, logs, categorize, auto-sync schedule
+  - `analytics`: overview, senders, subscriptions, alerts feed, EDA, triage
   - `emails`: list/search/get emails
   - `actions`: trash, mark-read, label, trash-sender (preview-first)
   - `categories`: list categories, assign sender override
   - `alert_rules`: manage pinned sender watchlist
   - `expenses`: expense rules, extraction, analytics
   - `rules`: inbox automation rules
+  - `digest`: daily digest endpoint (unread count, action items, newsletters)
 
 ### Frontend (`frontend/`)
 
 - Vite + React + TailwindCSS + Recharts
-- Views: Overview, Senders, Subscriptions, Browse, Search, Sync, Categories, Alerts
+- Fully responsive: mobile hamburger drawer, horizontally-scrollable tables, responsive grid layouts
+- Views: Overview, Senders, Subscriptions, Browse, Search, Sync, Categories, Alerts, Triage, Spending, Rules
 - `frontend/src/api.js` provides API bindings to the FastAPI backend
 
 ## Data Model
@@ -131,9 +143,22 @@ Overview and EDA are computed via single-pass scans over metadata:
 
 ### Authentication
 
-- Backend performs Google OAuth and stores a signed session cookie.
-- All `/api/*` routes are protected by a session dependency.
-- Access is limited to a single allowed email.
+- Backend uses a Google OAuth **Web Application** client (not Desktop type).
+- `GET /api/auth/login` builds Google consent URL with `state` CSRF token.
+- `GET /api/auth/callback` exchanges code for token, validates email against allowlist, writes signed session cookie.
+- Session cookie: `HttpOnly`, `SameSite=lax`, `Secure` when `DASHBOARD_HTTPS_ONLY=true`.
+- `OAUTHLIB_RELAX_TOKEN_SCOPE=1` set globally to avoid scope-mismatch errors on token exchange.
+- `authorization_response` URL gets `http://` → `https://` rewrite in callback when behind reverse proxy (Cloudflare).
+- All `/api/*` routes are protected by a `get_current_user` session dependency.
+- Access is limited to `DASHBOARD_ALLOWED_EMAIL`.
+
+### Triage
+
+- `GET /api/analytics/triage?days=N` classifies emails into three buckets:
+  - **reply**: unread, from real people (not subscriptions), likely awaiting response
+  - **do**: subject matches action keywords (deadline, confirm, invoice, etc.)
+  - **read**: unread, non-subscription, not in reply/do
+- Frontend `/triage` view shows these buckets with per-email Gmail deep-links and Mark Read action.
 
 ### Expenses
 
@@ -178,18 +203,30 @@ Caches are invalidated on:
 
 ## Configuration
 
-Environment variables use `EMAIL_PARSER_` prefix:
+Library env vars use `EMAIL_PARSER_` prefix:
 - `EMAIL_PARSER_CHROMA_PERSIST_DIR`
 - `EMAIL_PARSER_GOOGLE_CREDENTIALS_PATH`
 - `EMAIL_PARSER_GOOGLE_TOKEN_PATH`
 - `EMAIL_PARSER_EMBEDDING_MODEL`
 - `EMAIL_PARSER_SYNC_BATCH_SIZE`
 
+Dashboard-specific env vars (no prefix):
+- `DASHBOARD_AUTH_ENABLED` — enable/disable auth gate
+- `DASHBOARD_GOOGLE_CLIENT_ID` — Web App OAuth client ID
+- `DASHBOARD_GOOGLE_CLIENT_SECRET` — Web App OAuth client secret
+- `DASHBOARD_GOOGLE_REDIRECT_URI` — e.g. `https://emailcollie.yourdomain.com/api/auth/callback`
+- `DASHBOARD_ALLOWED_EMAIL` — single email address allowed to log in
+- `DASHBOARD_HTTPS_ONLY` — set `true` in production for secure cookies
+- `GOOGLE_API_KEY` — for any generative API calls (digest, etc.)
+
 ## Security and Privacy
 
-- OAuth tokens and credentials remain local (`token.json`, `credentials.json`)
-- No external database or telemetry (ChromaDB telemetry disabled)
-- Destructive actions require explicit confirmation
+- Dashboard protected by Google OAuth; only `DASHBOARD_ALLOWED_EMAIL` can log in.
+- Session cookie is signed with a randomly-generated secret persisted in `<chroma_persist_dir>/dashboard_session_secret.txt`.
+- OAuth tokens and credentials remain local (`token.json`, `.env`).
+- No external database or telemetry (ChromaDB telemetry disabled).
+- Destructive actions require explicit confirmation (`preview → confirm`).
+- `.env`, `client_secret_*.json`, and `*.pem` files must never be committed (covered by `.gitignore`).
 
 ## Known Limitations / Considerations
 

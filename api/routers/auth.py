@@ -51,7 +51,7 @@ def _redirect_uri(config: dict, origin: str | None = None) -> str:
     if not redirect_uris:
         raise HTTPException(status_code=500, detail="No redirect URI configured")
     for uri in redirect_uris:
-        if ":8000" in uri:
+        if uri.startswith(("http://localhost:8000", "http://127.0.0.1:8000")):
             return uri
     if origin and origin in settings.cors_origin_list():
         candidate = f"{origin}/api/auth/callback"
@@ -87,7 +87,7 @@ def login(request: Request, next: str | None = None):
 
     if request.url.hostname in {"localhost", "127.0.0.1"}:
         os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+    os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
     config = _client_config()
     flow = Flow.from_client_config(config, scopes=_SCOPES)
@@ -102,8 +102,7 @@ def login(request: Request, next: str | None = None):
     authorization_url, returned_state = flow.authorization_url(
         state=state,
         access_type="online",
-        include_granted_scopes="true",
-        prompt="consent",
+        prompt="select_account",
     )
     request.session["oauth_state"] = returned_state
     return RedirectResponse(authorization_url)
@@ -117,7 +116,7 @@ def callback(request: Request):
 
     if request.url.hostname in {"localhost", "127.0.0.1"}:
         os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+    os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
     state = request.session.get("oauth_state")
     if not state:
@@ -129,6 +128,10 @@ def callback(request: Request):
     flow.redirect_uri = redirect_uri
 
     authorization_response = str(request.url)
+    # Cloudflare Tunnel terminates TLS; ensure the scheme is https when the
+    # registered redirect URI uses https but the proxy forwards plain HTTP.
+    if authorization_response.startswith("http://") and redirect_uri.startswith("https://"):
+        authorization_response = "https://" + authorization_response[len("http://"):]
     flow.fetch_token(authorization_response=authorization_response)
     credentials = flow.credentials
 

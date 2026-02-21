@@ -37,6 +37,10 @@ export const api = {
     categories: () => get('/analytics/categories'),
     alerts: (limit = 100) => get(`/analytics/alerts?limit=${limit}`),
     eda: () => get('/analytics/eda'),
+    triage: (days = 7) => get(`/analytics/triage?days=${days}`),
+  },
+  digest: {
+    summarize: (emails) => post('/digest/summarize', { emails }),
   },
   expenses: {
     overview: () => get('/expenses/overview'),

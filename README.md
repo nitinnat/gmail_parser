@@ -90,9 +90,33 @@ npm run dev
 
 Open http://localhost:5173
 
-Dashboard highlights:
+### Screenshots
+
+<table>
+<tr>
+<td><img src=”public/assets/screenshots/overview.png” width=”420” alt=”Overview”/><br/><b>Overview</b> — inbox stats, volume by month, day-of-week and hour-of-day heatmaps, EDA explorer</td>
+<td><img src=”public/assets/screenshots/browse.png” width=”420” alt=”Browse”/><br/><b>Browse</b> — paginated inbox explorer with sender/label/category filters; inline semantic, fulltext, and hybrid search</td>
+</tr>
+<tr>
+<td><img src=”public/assets/screenshots/categories.png” width=”420” alt=”Categories”/><br/><b>Categories</b> — create custom categories, assign senders or subjects, mark senders as Noise to exclude from analytics</td>
+<td><img src=”public/assets/screenshots/senders.png” width=”420” alt=”Senders”/><br/><b>Senders</b> — top senders ranked by volume with inline category reassignment and one-click trash</td>
+</tr>
+<tr>
+<td><img src=”public/assets/screenshots/subscriptions.png” width=”420” alt=”Subscriptions”/><br/><b>Subscriptions</b> — detected subscription senders with unsubscribe header detection</td>
+<td><img src=”public/assets/screenshots/alerts.png” width=”420” alt=”Alerts”/><br/><b>Alerts</b> — curated watchlist feed, group emails by sender, add notes, bulk mark-read</td>
+</tr>
+<tr>
+<td><img src=”public/assets/screenshots/rules.png” width=”420” alt=”Rules”/><br/><b>Rules</b> — define sender/keyword/label automation rules with dry-run preview before applying</td>
+<td><img src=”public/assets/screenshots/sync.png” width=”420” alt=”Sync”/><br/><b>Sync</b> — full and incremental sync controls, auto-sync toggle, live log stream</td>
+</tr>
+</table>
+
+### Dashboard highlights
+
 - Overview with EDA explorer (domains, category trends, heatmap)
+- Browse with unified semantic + fulltext + hybrid search
 - Senders table with inline category reassignment
+- Custom categories + Noise category (excluded from all analytics)
 - Alerts watchlist by sender with quick mark-read
 - Sync controls: full, incremental, auto-sync toggle, and logs
 - Spending dashboard with expense rules and analytics

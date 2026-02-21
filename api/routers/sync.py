@@ -29,7 +29,7 @@ _state = {
 }
 _lock = threading.Lock()
 
-_auto_sync = {"enabled": False, "interval_hours": 2, "next_run": None}
+_auto_sync = {"enabled": True, "interval_hours": 0.25, "next_run": time.time() + 0.25 * 3600}
 
 MAX_EVENTS = 200
 
@@ -220,9 +220,10 @@ def sync_events(after: str | None = None):
     """Return event log entries, optionally only those after a given ISO timestamp."""
     with _lock:
         events = list(_state["events"])
+        is_syncing = _state["is_syncing"]
     if after:
         events = [e for e in events if e["ts"] > after]
-    return {"events": events, "is_syncing": _state["is_syncing"]}
+    return {"events": events, "is_syncing": is_syncing}
 
 
 @router.get("/live-count")
