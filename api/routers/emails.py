@@ -1,5 +1,9 @@
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
+import io
 
+from gmail_parser.auth import GmailAuth
+from gmail_parser.client import GmailClient
 from gmail_parser.search import EmailSearch, SearchFilters
 from gmail_parser.store import EmailStore
 
@@ -46,3 +50,27 @@ def get_email(gmail_id: str):
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     return email
+
+
+@router.get("/{gmail_id}/attachments")
+def list_attachments(gmail_id: str):
+    client = GmailClient(GmailAuth())
+    try:
+        raw = client.get_message(gmail_id, format="full")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"attachments": GmailClient._extract_attachments(raw.get("payload", {}))}
+
+
+@router.get("/{gmail_id}/attachments/{attachment_id}/download")
+def download_attachment(gmail_id: str, attachment_id: str, filename: str = "attachment", mime_type: str = "application/octet-stream"):
+    client = GmailClient(GmailAuth())
+    try:
+        data = client.download_attachment(gmail_id, attachment_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

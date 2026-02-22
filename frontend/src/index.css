@@ -93,6 +93,12 @@ body {
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 .blink { animation: blink 1.2s step-end infinite; }
 
+/* Email panel slide-in */
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
 /* Checkbox */
 input[type='checkbox'] {
   accent-color: var(--accent);

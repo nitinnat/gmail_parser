@@ -49,10 +49,11 @@ class EmailSearch:
             if threshold is not None and score < threshold:
                 continue
             results.append({"id": id_, "document": doc, "metadata": meta, "score": score})
+        results.sort(key=lambda x: x["metadata"].get("date_timestamp", 0), reverse=True)
         return results
 
     def fulltext_search(self, query: str, limit: int = 20) -> list[dict]:
-        result = self._store.get_emails(limit=limit)
+        result = self._store.get_emails()  # fetch all — must scan full corpus
         query_lower = query.lower()
 
         matches = []
@@ -60,6 +61,7 @@ class EmailSearch:
             text = f"{meta.get('subject', '')} {doc}".lower()
             if query_lower in text:
                 matches.append({"id": id_, "document": doc, "metadata": meta, "score": 1.0})
+        matches.sort(key=lambda x: x["metadata"].get("date_timestamp", 0), reverse=True)
         return matches[:limit]
 
     def hybrid_search(
@@ -70,7 +72,7 @@ class EmailSearch:
         filters: SearchFilters | None = None,
     ) -> list[dict]:
         k = 60  # RRF constant
-        pool_size = limit * 3
+        pool_size = limit * 10
 
         semantic_results = self.semantic_search(query, limit=pool_size)
         fulltext_results = self.fulltext_search(query, limit=pool_size)
@@ -94,10 +96,15 @@ class EmailSearch:
         if filters:
             sorted_ids = [eid for eid in sorted_ids if self._matches_filters(result_map[eid]["metadata"], filters)]
 
-        return [
-            {**result_map[eid], "score": scores[eid]}
-            for eid in sorted_ids[:limit]
-        ]
+        # Guarantee exact fulltext matches are always included — RRF scoring alone
+        # downweights items that appear only in fulltext, causing misses on exact keywords.
+        fulltext_ids = [item["id"] for item in fulltext_results if item["id"] in result_map]
+        hybrid_ids = [eid for eid in sorted_ids if eid not in set(fulltext_ids)]
+        combined = (fulltext_ids + hybrid_ids)[:limit]
+
+        candidates = [{**result_map[eid], "score": scores.get(eid, 0)} for eid in combined]
+        candidates.sort(key=lambda x: x["metadata"].get("date_timestamp", 0), reverse=True)
+        return candidates
 
     # --- Filtered queries ---
 

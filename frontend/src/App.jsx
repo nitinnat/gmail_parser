@@ -3,35 +3,47 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import AuthGate from './AuthGate'
 import Sidebar from './components/Sidebar'
 import SyncBar from './components/SyncBar'
+import EmailPanel from './components/EmailPanel'
 import Overview from './views/Overview'
 import Senders from './views/Senders'
-import Subscriptions from './views/Subscriptions'
 import Spending from './views/Spending'
 import Browse from './views/Browse'
-import SyncPage from './views/Sync'
-import Categories from './views/Categories'
 import Alerts from './views/Alerts'
-import Rules from './views/Rules'
 import Triage from './views/Triage'
+import Settings from './views/Settings'
+import MDR from './views/MDR'
 
-function AnimatedRoutes() {
+function AnimatedRoutes({ onOpenEmail }) {
   const location = useLocation()
+  const isMDR = location.pathname === '/mdr'
+
+  if (isMDR) {
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <Routes location={location}>
+          <Route path="/mdr" element={<MDR />} />
+        </Routes>
+      </div>
+    )
+  }
+
   return (
     <main key={location.pathname} className="page-in flex-1 overflow-auto dot-grid">
       <div className="p-4 md:p-7">
         <Routes location={location}>
           <Route path="/" element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<Overview />} />
-          <Route path="/triage" element={<Triage />} />
-          <Route path="/senders" element={<Senders />} />
-          <Route path="/subscriptions" element={<Subscriptions />} />
+          <Route path="/triage" element={<Triage onOpenEmail={onOpenEmail} />} />
+          <Route path="/browse" element={<Browse onOpenEmail={onOpenEmail} />} />
           <Route path="/spending" element={<Spending />} />
-          <Route path="/browse" element={<Browse />} />
-          <Route path="/search" element={<Navigate to="/browse" replace />} />
-          <Route path="/sync" element={<SyncPage />} />
-          <Route path="/categories" element={<Categories />} />
+          <Route path="/senders" element={<Senders />} />
           <Route path="/alerts" element={<Alerts />} />
-          <Route path="/rules" element={<Rules />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/search" element={<Navigate to="/browse" replace />} />
+          <Route path="/subscriptions" element={<Navigate to="/senders" replace />} />
+          <Route path="/sync" element={<Navigate to="/settings" replace />} />
+          <Route path="/categories" element={<Navigate to="/settings" replace />} />
+          <Route path="/rules" element={<Navigate to="/settings" replace />} />
         </Routes>
       </div>
     </main>
@@ -40,6 +52,7 @@ function AnimatedRoutes() {
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [openEmailId, setOpenEmailId] = useState(null)
 
   const logout = async () => {
     await import('./api').then(({ api }) => api.auth.logout())
@@ -77,9 +90,12 @@ export default function App() {
               </button>
             </div>
             <SyncBar />
-            <AnimatedRoutes />
+            <AnimatedRoutes onOpenEmail={(id) => setOpenEmailId(id)} />
           </div>
         </div>
+        {openEmailId && (
+          <EmailPanel emailId={openEmailId} onClose={() => setOpenEmailId(null)} />
+        )}
       </AuthGate>
     </BrowserRouter>
   )

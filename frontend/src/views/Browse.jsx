@@ -48,7 +48,7 @@ function Toggle({ label, checked, onChange }) {
   )
 }
 
-export default function Browse() {
+export default function Browse({ onOpenEmail }) {
   const [searchParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -306,7 +306,7 @@ export default function Browse() {
             ) : (
               emails.map((email) => (
                 <div key={email.id} className="relative group" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <EmailRow email={email} checked={selected.has(email.id)} onCheck={toggleSelect} />
+                  <EmailRow email={email} checked={selected.has(email.id)} onCheck={toggleSelect} onOpen={onOpenEmail} />
                   {isSearchMode && email.score !== undefined && (
                     <span
                       className="absolute right-3 top-3 text-[10px] tabular-nums"

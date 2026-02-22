@@ -29,7 +29,8 @@ _state = {
 }
 _lock = threading.Lock()
 
-_auto_sync = {"enabled": True, "interval_hours": 0.25, "next_run": time.time() + 0.25 * 3600}
+_AUTO_SYNC_INTERVAL_SECS = 30
+_auto_sync = {"enabled": True, "interval_hours": _AUTO_SYNC_INTERVAL_SECS / 3600, "next_run": time.time() + _AUTO_SYNC_INTERVAL_SECS}
 
 MAX_EVENTS = 200
 
@@ -43,7 +44,7 @@ def _push_event(msg: str):
 
 def _auto_sync_loop():
     while True:
-        time.sleep(60)
+        time.sleep(10)
         with _lock:
             if not _auto_sync["enabled"] or _state["is_syncing"]:
                 continue

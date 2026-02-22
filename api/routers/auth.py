@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -17,6 +20,30 @@ from gmail_parser.config import settings as parser_settings
 router = APIRouter()
 
 _SCOPES = ["openid", "email", "profile"]
+
+
+def _make_state(raw: str, redirect_uri: str, next_path: str, secret: str) -> str:
+    """Encode OAuth state + metadata into a signed, URL-safe token."""
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"s": raw, "r": redirect_uri, "n": next_path}).encode()
+    ).decode()
+    sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
+    return f"{payload}.{sig}"
+
+
+def _parse_state(token: str, secret: str) -> dict | None:
+    """Verify and decode a state token; returns None if invalid."""
+    parts = token.rsplit(".", 1)
+    if len(parts) != 2:
+        return None
+    payload, sig = parts
+    expected = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
+    if not hmac.compare_digest(sig, expected):
+        return None
+    try:
+        return json.loads(base64.urlsafe_b64decode(payload.encode()))
+    except Exception:
+        return None
 
 
 def _client_config() -> dict:
@@ -90,21 +117,18 @@ def login(request: Request, next: str | None = None):
     os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
     config = _client_config()
-    flow = Flow.from_client_config(config, scopes=_SCOPES)
     redirect_uri = _redirect_uri(config, request.headers.get("origin"))
-    request.session["redirect_uri"] = redirect_uri
+    next_path = _safe_next(next)
+    raw_state = secrets.token_urlsafe(32)
+    signed_state = _make_state(raw_state, redirect_uri, next_path, settings.ensure_session_secret())
+
+    flow = Flow.from_client_config(config, scopes=_SCOPES)
     flow.redirect_uri = redirect_uri
-
-    state = secrets.token_urlsafe(32)
-    request.session["oauth_state"] = state
-    request.session["next"] = _safe_next(next)
-
-    authorization_url, returned_state = flow.authorization_url(
-        state=state,
+    authorization_url, _ = flow.authorization_url(
+        state=signed_state,
         access_type="online",
         prompt="select_account",
     )
-    request.session["oauth_state"] = returned_state
     return RedirectResponse(authorization_url)
 
 
@@ -118,18 +142,19 @@ def callback(request: Request):
         os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
     os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
-    state = request.session.get("oauth_state")
-    if not state:
+    signed_state = request.query_params.get("state", "")
+    parsed = _parse_state(signed_state, settings.ensure_session_secret())
+    if not parsed:
         raise HTTPException(status_code=400, detail="Missing OAuth state")
 
+    redirect_uri = parsed["r"]
+    next_path = parsed["n"]
+
     config = _client_config()
-    flow = Flow.from_client_config(config, scopes=_SCOPES, state=state)
-    redirect_uri = request.session.get("redirect_uri") or _redirect_uri(config)
+    flow = Flow.from_client_config(config, scopes=_SCOPES, state=signed_state)
     flow.redirect_uri = redirect_uri
 
     authorization_response = str(request.url)
-    # Cloudflare Tunnel terminates TLS; ensure the scheme is https when the
-    # registered redirect URI uses https but the proxy forwards plain HTTP.
     if authorization_response.startswith("http://") and redirect_uri.startswith("https://"):
         authorization_response = "https://" + authorization_response[len("http://"):]
     flow.fetch_token(authorization_response=authorization_response)
@@ -175,8 +200,6 @@ def callback(request: Request):
     }
     request.session["expires_at"] = time.time() + settings.session_ttl_seconds
 
-    next_path = request.session.pop("next", "/")
-    request.session.pop("oauth_state", None)
     return RedirectResponse(next_path or "/")
 
 

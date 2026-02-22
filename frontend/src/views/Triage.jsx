@@ -22,18 +22,19 @@ function senderName(sender) {
   return m ? m[1].trim() : sender.split('@')[0]
 }
 
-function EmailRow({ email, onMarkRead }) {
+function EmailRow({ email, onMarkRead, onOpen }) {
   const [hover, setHover] = useState(false)
   const catColor = CATEGORY_COLORS[email.category] || '#aaa'
   const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${email.id}`
 
   return (
     <div
-      className="flex items-center gap-4 px-5 py-3 transition-colors duration-100"
+      className={`flex items-center gap-4 px-5 py-3 transition-colors duration-100 ${onOpen ? 'cursor-pointer' : ''}`}
       style={{
         borderBottom: '1px solid rgba(255,255,255,0.04)',
         background: hover ? 'rgba(255,255,255,0.02)' : 'transparent',
       }}
+      onClick={onOpen ? () => onOpen(email.id) : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
@@ -72,6 +73,7 @@ function EmailRow({ email, onMarkRead }) {
           href={gmailUrl}
           target="_blank"
           rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
           className="text-[10px] tracking-wider uppercase"
           style={{ color: 'var(--accent)' }}
         >
@@ -82,6 +84,7 @@ function EmailRow({ email, onMarkRead }) {
         href={gmailUrl}
         target="_blank"
         rel="noreferrer"
+        onClick={(e) => e.stopPropagation()}
         className="md:hidden text-[10px] flex-shrink-0"
         style={{ color: 'var(--accent)' }}
       >
@@ -91,7 +94,7 @@ function EmailRow({ email, onMarkRead }) {
   )
 }
 
-function BucketSection({ bucket, emails, onMarkRead }) {
+function BucketSection({ bucket, emails, onMarkRead, onOpen }) {
   const meta = BUCKET_META[bucket]
   if (!emails.length) return null
 
@@ -110,13 +113,13 @@ function BucketSection({ bucket, emails, onMarkRead }) {
         <span className="text-[11px] tabular-nums text-base-400">{emails.length}</span>
       </div>
       {emails.map((e) => (
-        <EmailRow key={e.id} email={e} onMarkRead={onMarkRead} />
+        <EmailRow key={e.id} email={e} onMarkRead={onMarkRead} onOpen={onOpen} />
       ))}
     </div>
   )
 }
 
-export default function Triage() {
+export default function Triage({ onOpenEmail }) {
   const [days, setDays] = useState(7)
   const [triage, setTriage] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -183,9 +186,9 @@ export default function Triage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <BucketSection bucket="reply" emails={triage.reply} onMarkRead={handleMarkRead} />
-          <BucketSection bucket="do"    emails={triage.do}    onMarkRead={handleMarkRead} />
-          <BucketSection bucket="read"  emails={triage.read}  onMarkRead={handleMarkRead} />
+          <BucketSection bucket="reply" emails={triage.reply} onMarkRead={handleMarkRead} onOpen={onOpenEmail} />
+          <BucketSection bucket="do"    emails={triage.do}    onMarkRead={handleMarkRead} onOpen={onOpenEmail} />
+          <BucketSection bucket="read"  emails={triage.read}  onMarkRead={handleMarkRead} onOpen={onOpenEmail} />
         </div>
       )}
     </div>

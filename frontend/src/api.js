@@ -58,6 +58,9 @@ export const api = {
   emails: {
     list: (params) => get(`/emails?${new URLSearchParams(params)}`),
     get: (id) => get(`/emails/${id}`),
+    attachments: (id) => get(`/emails/${id}/attachments`),
+    downloadAttachmentUrl: (id, attachmentId, filename, mimeType) =>
+      `/api/emails/${id}/attachments/${attachmentId}/download?filename=${encodeURIComponent(filename)}&mime_type=${encodeURIComponent(mimeType)}`,
   },
   categories: {
     list: () => get('/categories'),

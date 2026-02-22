@@ -1,17 +1,18 @@
 import { CATEGORY_COLORS } from '../categories'
 
-export default function EmailRow({ email, checked, onCheck }) {
+export default function EmailRow({ email, checked, onCheck, onOpen }) {
   const meta = email.metadata || {}
   const unread = !meta.is_read
   const catColor = meta.category && meta.category !== 'Other' ? CATEGORY_COLORS[meta.category] : null
 
   return (
     <div
-      className="flex items-start gap-4 px-4 py-3 transition-colors duration-100 cursor-default"
+      className={`flex items-start gap-4 px-4 py-3 transition-colors duration-100 ${onOpen ? 'cursor-pointer' : 'cursor-default'}`}
       style={{
         borderLeft: unread ? '2px solid var(--accent)' : '2px solid transparent',
         background: checked ? 'rgba(0,200,240,0.04)' : 'transparent',
       }}
+      onClick={onOpen ? () => onOpen(email.id) : undefined}
       onMouseEnter={(e) => { if (!checked) e.currentTarget.style.background = 'rgba(255,255,255,0.02)' }}
       onMouseLeave={(e) => { if (!checked) e.currentTarget.style.background = 'transparent' }}
     >

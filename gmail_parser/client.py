@@ -193,12 +193,11 @@ class GmailClient:
 
     # --- History ---
 
-    def list_history(self, start_history_id: str, history_types: list[str] | None = None) -> list[dict]:
+    def list_history(self, start_history_id: str) -> list[dict]:
         records = []
         request = self.service.users().history().list(
             userId="me",
             startHistoryId=start_history_id,
-            historyTypes=history_types or ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"],
         )
         while request:
             response = request.execute()
@@ -282,7 +281,7 @@ class GmailClient:
                 html_body = decoded
 
         if not text_body and html_body:
-            text_body = BeautifulSoup(html_body, "html.parser").get_text(separator=" ", strip=True)
+            text_body = BeautifulSoup(html_body, "html.parser").get_text(separator="\n").strip()
 
         return text_body, html_body
 

@@ -3,8 +3,10 @@ import { api } from '../api'
 
 function formatCountdown(nextRun) {
   if (!nextRun) return null
-  const mins = Math.round((new Date(nextRun) - Date.now()) / 60000)
-  if (mins <= 0) return 'soon'
+  const secs = Math.round((new Date(nextRun) - Date.now()) / 1000)
+  if (secs <= 0) return 'soon'
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
   if (mins < 60) return `${mins}m`
   const h = Math.floor(mins / 60)
   const m = mins % 60
@@ -28,9 +30,12 @@ export default function SyncBar() {
     api.sync.autoSync().then(setAutoSync)
   }, [fetchStatus])
 
-  // Refresh countdown display every 30s
+  // Refresh countdown display and auto-sync state every 10s
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 30000)
+    const id = setInterval(() => {
+      setTick((t) => t + 1)
+      api.sync.autoSync().then(setAutoSync)
+    }, 10000)
     return () => clearInterval(id)
   }, [])
 

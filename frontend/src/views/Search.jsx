@@ -9,7 +9,7 @@ const MODES = [
   { id: 'fulltext', label: 'Fulltext',  desc: 'Substring match' },
 ]
 
-export default function Search() {
+export default function Search({ onOpenEmail }) {
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState('hybrid')
   const [category, setCategory] = useState('')
@@ -121,7 +121,7 @@ export default function Search() {
             ) : (
               results.map((email) => (
                 <div key={email.id} className="relative" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <EmailRow email={email} />
+                  <EmailRow email={email} onOpen={onOpenEmail} />
                   {email.score !== undefined && (
                     <span
                       className="absolute right-3 top-3 text-[10px] tabular-nums"

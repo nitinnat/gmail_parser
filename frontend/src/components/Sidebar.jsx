@@ -1,16 +1,14 @@
 import { NavLink } from 'react-router-dom'
 
 const links = [
-  { to: '/overview',       label: 'Overview',       num: '01' },
-  { to: '/triage',         label: 'Triage',         num: '02' },
-  { to: '/senders',        label: 'Senders',        num: '03' },
-  { to: '/subscriptions',  label: 'Subscriptions',  num: '04' },
-  { to: '/spending',       label: 'Spending',       num: '05' },
-  { to: '/browse',         label: 'Browse',         num: '06' },
-  { to: '/sync',           label: 'Sync',           num: '07' },
-  { to: '/categories',     label: 'Categories',     num: '08' },
-  { to: '/alerts',         label: 'Alerts',         num: '09' },
-  { to: '/rules',          label: 'Rules',          num: '10' },
+  { to: '/overview',  label: 'Overview',  num: '01' },
+  { to: '/triage',    label: 'Triage',    num: '02' },
+  { to: '/browse',    label: 'Browse',    num: '03' },
+  { to: '/spending',  label: 'Spending',  num: '04' },
+  { to: '/senders',   label: 'Senders',   num: '05' },
+  { to: '/alerts',    label: 'Alerts',    num: '06' },
+  { to: '/settings',  label: 'Settings',  num: '07' },
+  { to: '/mdr',       label: 'MDR',       num: '08' },
 ]
 
 export default function Sidebar({ open, onClose, onLogout }) {
