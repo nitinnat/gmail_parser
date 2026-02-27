@@ -2,8 +2,10 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -18,8 +20,14 @@ from api.settings import settings
 from gmail_parser.config import settings as parser_settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-_SCOPES = ["openid", "email", "profile"]
+_SCOPES = [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/gmail.modify",
+]
 
 
 def _make_state(raw: str, redirect_uri: str, next_path: str, secret: str) -> str:
@@ -106,6 +114,27 @@ def _ensure_configured() -> None:
     settings.ensure_session_secret()
 
 
+def _post_login_sync():
+    """Kick off an incremental sync (or recent fallback) after login."""
+    try:
+        from gmail_parser.ingestion import IngestionPipeline
+        from api.routers.sync import _run_incremental, _auto_sync, _lock
+        pipeline = IngestionPipeline()
+        state = pipeline._store.get_sync_state()
+        if state and state.get("last_history_id"):
+            logger.info("[auth] triggering incremental sync on login")
+            _run_incremental()
+        else:
+            logger.info("[auth] no history_id — skipping login sync (run full sync first)")
+        # Re-enable auto sync in case it was paused due to invalid_grant
+        with _lock:
+            if not _auto_sync["enabled"]:
+                _auto_sync["enabled"] = True
+                logger.info("[auth] re-enabled auto sync after login")
+    except Exception as e:
+        logger.warning("[auth] post-login sync failed: %s", e)
+
+
 @router.get("/login")
 def login(request: Request, next: str | None = None):
     _ensure_configured()
@@ -126,8 +155,8 @@ def login(request: Request, next: str | None = None):
     flow.redirect_uri = redirect_uri
     authorization_url, _ = flow.authorization_url(
         state=signed_state,
-        access_type="online",
-        prompt="select_account",
+        access_type="offline",
+        prompt="consent",
     )
     return RedirectResponse(authorization_url)
 
@@ -159,6 +188,12 @@ def callback(request: Request):
         authorization_response = "https://" + authorization_response[len("http://"):]
     flow.fetch_token(authorization_response=authorization_response)
     credentials = flow.credentials
+
+    # Persist Gmail API token so IngestionPipeline can use it
+    token_path = Path(parser_settings.google_token_path)
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(credentials.to_json())
+    logger.info("[auth] Gmail token saved to %s", token_path)
 
     id_token_value = getattr(credentials, "id_token", None)
     if not id_token_value:
@@ -199,6 +234,8 @@ def callback(request: Request):
         "sub": info.get("sub", ""),
     }
     request.session["expires_at"] = time.time() + settings.session_ttl_seconds
+
+    threading.Thread(target=_post_login_sync, daemon=True).start()
 
     return RedirectResponse(next_path or "/")
 

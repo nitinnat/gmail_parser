@@ -15,7 +15,7 @@ from api.routers import (
     emails,
     actions,
     categories,
-    alert_rules,
+    action_items,
     auth,
     expenses,
     rules,
@@ -61,7 +61,7 @@ app.include_router(
     categories.router, prefix="/api/categories", dependencies=[Depends(require_auth)]
 )
 app.include_router(
-    alert_rules.router, prefix="/api/alerts", dependencies=[Depends(require_auth)]
+    action_items.router, prefix="/api/alerts", dependencies=[Depends(require_auth)]
 )
 app.include_router(
     expenses.router, prefix="/api/expenses", dependencies=[Depends(require_auth)]

@@ -8,7 +8,7 @@ import Overview from './views/Overview'
 import Senders from './views/Senders'
 import Spending from './views/Spending'
 import Browse from './views/Browse'
-import Alerts from './views/Alerts'
+import Actions from './views/Actions'
 import Triage from './views/Triage'
 import Settings from './views/Settings'
 import MDR from './views/MDR'
@@ -37,7 +37,7 @@ function AnimatedRoutes({ onOpenEmail }) {
           <Route path="/browse" element={<Browse onOpenEmail={onOpenEmail} />} />
           <Route path="/spending" element={<Spending />} />
           <Route path="/senders" element={<Senders />} />
-          <Route path="/alerts" element={<Alerts />} />
+          <Route path="/alerts" element={<Actions onOpenEmail={onOpenEmail} />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/search" element={<Navigate to="/browse" replace />} />
           <Route path="/subscriptions" element={<Navigate to="/senders" replace />} />

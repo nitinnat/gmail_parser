@@ -46,6 +46,7 @@ export default function SyncPage() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [categorizing, setCategorizing] = useState(false)
   const [catResult, setCatResult] = useState(null)
+  const [llmStatus, setLlmStatus] = useState(null)
   const logRef = useRef(null)
 
   const fetchAll = useCallback(async () => {
@@ -128,6 +129,19 @@ export default function SyncPage() {
     setCatResult(res)
     setCategorizing(false)
   }
+
+  const startLlmProcess = async (force = false) => {
+    await api.sync.llmProcess(force)
+    const poll = setInterval(async () => {
+      const s = await api.sync.llmProcessStatus()
+      setLlmStatus(s)
+      if (!s.is_running) clearInterval(poll)
+    }, 2000)
+  }
+
+  useEffect(() => {
+    api.sync.llmProcessStatus().then(setLlmStatus)
+  }, [])
 
   // Merge: show script lines then api logs (api logs are for API-triggered syncs)
   const allLines = [
@@ -332,6 +346,54 @@ export default function SyncPage() {
           {!status?.has_history_id && (
             <span className="text-[10px] text-base-400">run a full sync first to enable</span>
           )}
+        </div>
+      </div>
+
+      {/* LLM Process */}
+      <div className="p-5 space-y-4" style={{ border: '1px solid var(--border)' }}>
+        <p className="text-[10px] tracking-[0.25em] uppercase text-base-400">LLM Processing</p>
+        <p className="text-[11px] text-base-400">
+          Run LLM-based categorization and action item extraction on all emails that haven't been processed yet.
+          This is a one-time operation — emails already processed will be skipped.
+        </p>
+        {llmStatus && (
+          <div className="space-y-2">
+            {llmStatus.is_running && llmStatus.total > 0 && (
+              <>
+                <ProgressBar pct={Math.round((llmStatus.processed / llmStatus.total) * 100)} />
+                <p className="text-[10px] text-base-400 tabular-nums">
+                  {llmStatus.processed.toLocaleString()} / {llmStatus.total.toLocaleString()} emails
+                </p>
+              </>
+            )}
+            {!llmStatus.is_running && llmStatus.total > 0 && (
+              <p className="text-[10px]" style={{ color: llmStatus.error ? 'var(--danger)' : 'var(--ok)' }}>
+                {llmStatus.error ? `Error: ${llmStatus.error}` : `Done — ${llmStatus.processed.toLocaleString()} / ${llmStatus.total.toLocaleString()} emails processed`}
+              </p>
+            )}
+          </div>
+        )}
+        <div className="flex gap-3 flex-wrap">
+          <button
+            onClick={() => startLlmProcess(false)}
+            disabled={llmStatus?.is_running}
+            className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150 disabled:opacity-40"
+            style={{ color: 'var(--accent)', border: '1px solid rgba(0,200,240,0.3)', background: 'rgba(0,200,240,0.06)' }}
+            onMouseEnter={(e) => { if (!llmStatus?.is_running) e.currentTarget.style.background = 'rgba(0,200,240,0.1)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,200,240,0.06)' }}
+          >
+            {llmStatus?.is_running ? `Processing… (${llmStatus.processed}/${llmStatus.total})` : 'Run LLM Processing'}
+          </button>
+          <button
+            onClick={() => startLlmProcess(true)}
+            disabled={llmStatus?.is_running}
+            className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150 disabled:opacity-40"
+            style={{ color: 'var(--base-400)', border: '1px solid var(--border)', background: 'transparent' }}
+            onMouseEnter={(e) => { if (!llmStatus?.is_running) e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+          >
+            Reprocess All
+          </button>
         </div>
       </div>
 

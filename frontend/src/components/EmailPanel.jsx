@@ -1,14 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-
-// Only strip HTML if the content actually looks like HTML — plain text emails
-// with angle brackets (e.g. <user@example.com>) must not be run through DOMParser.
-function processBody(text) {
-  if (!text) return ''
-  if (!/<(html|body|div|p|br|span|table|td|tr|font|a|img)\b/i.test(text)) return text
-  const doc = new DOMParser().parseFromString(text, 'text/html')
-  return doc.body.innerText || doc.body.textContent || ''
-}
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`
@@ -16,15 +7,73 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// Wrap raw HTML in a minimal document with base target="_blank" so all links
+// open in new tabs, and reset styles so the email renders as intended.
+function buildSrcdoc(html) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<base target="_blank">
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #111;
+    background: #ffffff;
+    margin: 0;
+    padding: 12px 16px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  img { max-width: 100%; height: auto; }
+  a { color: #1a73e8; }
+  table { border-collapse: collapse; }
+  td, th { vertical-align: top; }
+</style>
+</head>
+<body>${html}</body>
+</html>`
+}
+
+function HtmlBody({ html }) {
+  const iframeRef = useRef(null)
+  const [height, setHeight] = useState(500)
+
+  const onLoad = () => {
+    try {
+      const doc = iframeRef.current?.contentDocument
+      if (doc?.body) setHeight(doc.body.scrollHeight + 32)
+    } catch {
+      // cross-origin restriction; keep default height
+    }
+  }
+
+  return (
+    <iframe
+      ref={iframeRef}
+      srcDoc={buildSrcdoc(html)}
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      onLoad={onLoad}
+      style={{ width: '100%', height, border: 'none', display: 'block', background: '#fff' }}
+      title="Email content"
+    />
+  )
+}
+
 export default function EmailPanel({ emailId, onClose }) {
   const [email, setEmail] = useState(null)
+  const [body, setBody] = useState(null)   // { html } or { text }
   const [error, setError] = useState(false)
   const [attachments, setAttachments] = useState(null)
 
   useEffect(() => {
     setEmail(null)
+    setBody(null)
     setError(false)
     setAttachments(null)
+
     api.emails.get(emailId)
       .then((data) => {
         if (!data || data.detail) { setError(true); return }
@@ -35,6 +84,11 @@ export default function EmailPanel({ emailId, onClose }) {
         }
       })
       .catch(() => setError(true))
+
+    // Fetch the actual HTML body from Gmail
+    api.emails.body(emailId)
+      .then((data) => setBody(data))
+      .catch(() => {})
   }, [emailId])
 
   useEffect(() => {
@@ -58,7 +112,7 @@ export default function EmailPanel({ emailId, onClose }) {
       <div
         className="fixed right-0 top-0 bottom-0 z-50 flex flex-col font-mono"
         style={{
-          width: 'min(520px, 100vw)',
+          width: 'min(620px, 100vw)',
           background: '#0a0a0a',
           borderLeft: '1px solid rgba(255,255,255,0.1)',
           animation: 'slideInRight 0.18s ease-out',
@@ -136,14 +190,16 @@ export default function EmailPanel({ emailId, onClose }) {
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto">
           {error ? (
-            <p className="text-[12px] text-base-400">Failed to load email.</p>
+            <p className="px-5 py-4 text-[12px] text-base-400">Failed to load email.</p>
           ) : !email ? (
-            <p className="text-[12px] text-base-400">Loading<span className="blink">_</span></p>
+            <p className="px-5 py-4 text-[12px] text-base-400">Loading<span className="blink">_</span></p>
+          ) : body?.html ? (
+            <HtmlBody html={body.html} />
           ) : (
-            <pre className="text-[12px] text-base-300 whitespace-pre-wrap leading-relaxed break-words">
-              {processBody(email.document) || '(no body)'}
+            <pre className="px-5 py-4 text-[12px] text-base-300 whitespace-pre-wrap leading-relaxed break-words">
+              {body?.text || email.document || '(no body)'}
             </pre>
           )}
         </div>

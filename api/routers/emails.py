@@ -52,6 +52,20 @@ def get_email(gmail_id: str):
     return email
 
 
+@router.get("/{gmail_id}/body")
+def get_email_body(gmail_id: str):
+    client = GmailClient(GmailAuth())
+    try:
+        raw = client.get_message(gmail_id, format="full")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    _, body_html = GmailClient._extract_body(raw.get("payload", {}))
+    if body_html:
+        return {"html": body_html}
+    body_text, _ = GmailClient._extract_body(raw.get("payload", {}))
+    return {"text": body_text}
+
+
 @router.get("/{gmail_id}/attachments")
 def list_attachments(gmail_id: str):
     client = GmailClient(GmailAuth())

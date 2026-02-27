@@ -6,7 +6,7 @@ const links = [
   { to: '/browse',    label: 'Browse',    num: '03' },
   { to: '/spending',  label: 'Spending',  num: '04' },
   { to: '/senders',   label: 'Senders',   num: '05' },
-  { to: '/alerts',    label: 'Alerts',    num: '06' },
+  { to: '/alerts',    label: 'Actions',   num: '06' },
   { to: '/settings',  label: 'Settings',  num: '07' },
   { to: '/mdr',       label: 'MDR',       num: '08' },
 ]

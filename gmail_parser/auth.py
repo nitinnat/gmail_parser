@@ -30,7 +30,30 @@ class GmailAuth:
 
     def authenticate(self) -> Credentials:
         if os.path.exists(self._token_path):
-            self._creds = Credentials.from_authorized_user_file(self._token_path, self._scopes)
+            try:
+                self._creds = Credentials.from_authorized_user_file(self._token_path, self._scopes)
+            except ValueError:
+                # Token was saved without refresh_token (e.g. online-mode web OAuth).
+                # Load raw token data and use the access token directly while it lasts.
+                import json
+                data = json.loads(open(self._token_path).read())
+                from datetime import datetime, timezone
+                expiry_str = data.get("expiry", "")
+                expiry = None
+                if expiry_str:
+                    try:
+                        expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                    except ValueError:
+                        pass
+                self._creds = Credentials(
+                    token=data.get("token"),
+                    token_uri=data.get("token_uri"),
+                    client_id=data.get("client_id"),
+                    client_secret=data.get("client_secret"),
+                    scopes=data.get("scopes"),
+                    expiry=expiry,
+                )
+                logger.warning("[GmailAuth] token has no refresh_token — using access token until expiry")
 
         if self._creds and self._creds.valid:
             return self._creds

@@ -171,14 +171,21 @@ def _run_incremental():
     try:
         pipeline = IngestionPipeline()
         result = pipeline.incremental_sync()
+        suffix = " [fallback: 7-day sync]" if result.get("fallback") else ""
         _push_event(
             f"Done — +{result['added']:,} new, -{result['deleted']:,} deleted, "
-            f"{result['refreshed']:,} metadata refreshed"
+            f"{result['refreshed']:,} metadata refreshed{suffix}"
         )
     except Exception as e:
         with _lock:
             _state["error"] = str(e)
         _push_event(f"ERROR: {e}")
+        if "invalid_grant" in str(e):
+            with _lock:
+                _auto_sync["enabled"] = False
+                _auto_sync["next_run"] = None
+            logger.warning("[auto_sync] paused due to invalid_grant — will resume after next login")
+            _push_event("Auto sync paused — token expired. Log out and log back in to resume.")
     finally:
         cache.invalidate(
             "overview",
@@ -231,6 +238,125 @@ def sync_events(after: str | None = None):
 def live_count():
     """Real-time ChromaDB email count — works even during background script ingestion."""
     return {"count": EmailStore().count()}
+
+
+_llm_state = {"is_running": False, "processed": 0, "total": 0, "error": None}
+_llm_lock = threading.Lock()
+
+
+_llm_logger = logging.getLogger("gmail_parser.llm_process")
+
+
+def _run_llm_process(force: bool = False):
+    from gmail_parser.llm_extractor import extract_batch, _BATCH_SIZE
+    import json
+
+    store = EmailStore()
+    all_emails = store.get_all_emails(include=["metadatas", "documents"])
+    ids = all_emails["ids"]
+    metadatas = all_emails["metadatas"]
+    documents = all_emails.get("documents") or [""] * len(ids)
+
+    unprocessed = [
+        (gid, m, doc)
+        for gid, m, doc in zip(ids, metadatas, documents)
+        if force or not m.get("actions_extracted")
+    ]
+    total = len(unprocessed)
+
+    with _llm_lock:
+        _llm_state.update({"is_running": True, "processed": 0, "total": total, "error": None})
+
+    _llm_logger.info(
+        "LLM processing started — %d emails to process (%d per call)%s",
+        total, _BATCH_SIZE, " [forced reprocess]" if force else "",
+    )
+
+    if not unprocessed:
+        _llm_logger.info("Nothing to process — all emails already have LLM extraction")
+        with _llm_lock:
+            _llm_state["is_running"] = False
+        return
+
+    email_inputs = [
+        {
+            "id": gid,
+            "subject": m.get("subject", ""),
+            "sender": m.get("sender", ""),
+            "snippet": doc or m.get("snippet", ""),
+            "metadata": m,
+        }
+        for gid, m, doc in unprocessed
+    ]
+
+    def _on_progress(done, _total):
+        with _llm_lock:
+            _llm_state["processed"] = done
+        _llm_logger.info("LLM processing — %d / %d emails done", done, _total)
+
+    try:
+        results = extract_batch(email_inputs, progress_callback=_on_progress)
+
+        update_ids, updates = [], []
+        action_count = 0
+        tx_count = 0
+        for gid, _, _ in unprocessed:
+            result = results.get(gid, {})
+            action_items = result.get("action_items", [])
+            spending = result.get("spending", {"is_transaction": False, "transactions": []})
+            update: dict = {
+                "actions_extracted": True,
+                "action_items_json": json.dumps(action_items),
+                "has_action_items": bool(action_items),
+                "spending_json": json.dumps(spending),
+                "has_transactions": bool(spending.get("transactions")),
+            }
+            if result.get("category"):
+                update["category"] = result["category"]
+                update["llm_categorized"] = True
+            if action_items:
+                action_count += 1
+            if spending.get("transactions"):
+                tx_count += 1
+            update_ids.append(gid)
+            updates.append(update)
+
+        store.update_metadatas_batch(update_ids, updates)
+        with _llm_lock:
+            _llm_state["processed"] = total
+
+        cache.invalidate("alerts", "overview", "categories", "expenses_overview", "expenses_tx")
+        _llm_logger.info(
+            "LLM processing done — %d emails, %d with action items, %d with transactions",
+            total, action_count, tx_count,
+        )
+    except Exception as e:
+        with _llm_lock:
+            _llm_state["error"] = str(e)
+        _push_event(f"ERROR: {e}")
+        logger.error("[llm_process] failed: %s", e)
+    finally:
+        with _llm_lock:
+            _llm_state["is_running"] = False
+
+
+class LlmProcessRequest(BaseModel):
+    force: bool = False
+
+
+@router.post("/llm-process")
+def start_llm_process(req: LlmProcessRequest = LlmProcessRequest()):
+    with _llm_lock:
+        if _llm_state["is_running"]:
+            return {"message": "LLM processing already in progress", **_llm_state}
+    threading.Thread(target=_run_llm_process, args=(req.force,), daemon=True).start()
+    return {"message": "LLM processing started"}
+
+
+@router.get("/llm-process")
+def llm_process_status():
+    with _llm_lock:
+        return dict(_llm_state)
 
 
 @router.post("/categorize")

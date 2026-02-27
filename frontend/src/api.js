@@ -26,6 +26,8 @@ export const api = {
     logs: (after) => get(`/sync/logs${after ? `?after=${encodeURIComponent(after)}` : ''}`),
     incremental: () => post('/sync/incremental', {}),
     categorize: () => post('/sync/categorize', {}),
+    llmProcess: (force = false) => post('/sync/llm-process', { force }),
+    llmProcessStatus: () => get('/sync/llm-process'),
     autoSync: () => get('/sync/auto'),
     setAutoSync: (enabled) => post('/sync/auto', { enabled }),
   },
@@ -58,6 +60,7 @@ export const api = {
   emails: {
     list: (params) => get(`/emails?${new URLSearchParams(params)}`),
     get: (id) => get(`/emails/${id}`),
+    body: (id) => get(`/emails/${id}/body`),
     attachments: (id) => get(`/emails/${id}/attachments`),
     downloadAttachmentUrl: (id, attachmentId, filename, mimeType) =>
       `/api/emails/${id}/attachments/${attachmentId}/download?filename=${encodeURIComponent(filename)}&mime_type=${encodeURIComponent(mimeType)}`,
@@ -73,9 +76,8 @@ export const api = {
     delete: (name) => fetch(`/api/categories/${encodeURIComponent(name)}`, { method: 'DELETE' }).then((r) => r.json()),
   },
   alerts: {
-    getRules: () => get('/alerts/rules'),
-    setRules: (rules) => put('/alerts/rules', rules),
-    feed: (limit = 500) => get(`/analytics/alerts?limit=${limit}`),
+    list: () => get('/alerts'),
+    dismiss: (dismissKey) => post('/alerts/dismiss', { dismiss_key: dismissKey }),
   },
   actions: {
     preview: {

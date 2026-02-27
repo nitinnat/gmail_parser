@@ -16,6 +16,31 @@ from gmail_parser.store import EmailStore
 
 router = APIRouter()
 
+
+def _get_llm_transactions(store: EmailStore) -> list[dict]:
+    result = store.get_emails(where={"has_transactions": {"$eq": True}})
+    transactions = []
+    for gid, meta in zip(result["ids"], result["metadatas"]):
+        spending_raw = meta.get("spending_json") or ""
+        if not spending_raw:
+            continue
+        try:
+            spending = json.loads(spending_raw)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        for tx in spending.get("transactions") or []:
+            if not isinstance(tx, dict):
+                continue
+            transactions.append({
+                "gmail_id": gid,
+                "subject": meta.get("subject", ""),
+                "sender": meta.get("sender", ""),
+                "email_date": meta.get("date_iso", ""),
+                **tx,
+                "date": tx.get("date") or meta.get("date_iso", ""),
+            })
+    return transactions
+
 _RULES_FILE = Path(parser_settings.chroma_persist_dir) / "expense_rules.json"
 
 
@@ -276,43 +301,37 @@ def reprocess_expenses():
 @router.get("/transactions")
 def list_transactions(
     page: int = Query(1, ge=1),
-    limit: int = Query(50, le=1000),
-    category: str | None = None,
-    sender: str | None = None,
+    limit: int = Query(500, le=2000),
+    merchant_category: str | None = None,
+    transaction_type: str | None = None,
+    currency: str | None = None,
+    is_recurring: bool | None = None,
+    is_international: bool | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
 ):
-    cache_key = f"expenses_tx:{page}:{limit}:{category}:{sender}:{date_from}:{date_to}"
-    cached = cache.get(cache_key, ttl=10)
-    if cached is not None:
-        return cached
-
-    where: dict | None = None
-    if category:
-        where = {"category": category}
-    if sender:
-        where = {"source_sender": {"$contains": sender}}
-    if date_from or date_to:
-        ts_filter = {}
-        if date_from:
-            ts_filter["$gte"] = int(datetime.fromisoformat(date_from).timestamp())
-        if date_to:
-            ts_filter["$lte"] = int(datetime.fromisoformat(date_to).timestamp())
-        where = (
-            {"$and": [where, {"date_timestamp": ts_filter}]}
-            if where
-            else {"date_timestamp": ts_filter}
-        )
-
     store = EmailStore()
-    result = store.get_expenses(where=where, limit=limit, offset=(page - 1) * limit)
-    items = []
-    for id_, meta in zip(result["ids"], result["metadatas"]):
-        items.append({"id": id_, **meta})
+    txns = _get_llm_transactions(store)
 
-    payload = {"items": items, "page": page, "limit": limit}
-    cache.set(cache_key, payload)
-    return payload
+    if merchant_category:
+        txns = [t for t in txns if (t.get("merchant_category") or "").lower() == merchant_category.lower()]
+    if transaction_type:
+        txns = [t for t in txns if (t.get("transaction_type") or "") == transaction_type]
+    if currency:
+        txns = [t for t in txns if (t.get("currency") or "USD") == currency]
+    if is_recurring is not None:
+        txns = [t for t in txns if bool(t.get("is_recurring")) == is_recurring]
+    if is_international is not None:
+        txns = [t for t in txns if bool(t.get("is_international")) == is_international]
+    if date_from:
+        txns = [t for t in txns if (t.get("date") or "") >= date_from]
+    if date_to:
+        txns = [t for t in txns if (t.get("date") or "") <= date_to]
+
+    txns.sort(key=lambda t: t.get("date") or t.get("email_date") or "", reverse=True)
+    total = len(txns)
+    offset = (page - 1) * limit
+    return {"items": txns[offset : offset + limit], "total": total, "page": page, "limit": limit}
 
 
 @router.get("/overview")
@@ -322,46 +341,69 @@ def overview():
         return cached
 
     store = EmailStore()
-    all_expenses = store.get_all_expenses(include=["metadatas"])
-    metas = all_expenses["metadatas"]
+    txns = _get_llm_transactions(store)
 
-    total_by_currency: dict[str, float] = defaultdict(float)
+    totals: dict[str, float] = defaultdict(float)
+    refunds: dict[str, float] = defaultdict(float)
     monthly: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    category_totals: dict[str, float] = defaultdict(float)
+    by_merchant_category: dict[str, float] = defaultdict(float)
+    by_transaction_type: dict[str, float] = defaultdict(float)
+    by_payment_method: dict[str, int] = defaultdict(int)
     merchant_totals: dict[str, float] = defaultdict(float)
+    recurring_monthly: dict[str, float] = defaultdict(float)
 
-    for m in metas:
-        amount = float(m.get("amount", 0))
-        currency = m.get("currency", "USD")
-        total_by_currency[currency] += amount
+    for tx in txns:
+        amount = float(tx.get("amount") or 0)
+        currency = tx.get("currency") or "USD"
+        tx_type = tx.get("transaction_type") or "other"
+        merchant_cat = tx.get("merchant_category") or "Other"
+        payment = tx.get("payment_method") or "other"
+        merchant = tx.get("merchant_normalized") or tx.get("merchant") or "Unknown"
+        date = tx.get("date") or ""
 
-        date_iso = m.get("date_iso")
-        if date_iso:
+        if tx_type == "refund":
+            refunds[currency] += amount
+            continue
+
+        totals[currency] += amount
+        by_merchant_category[merchant_cat] += amount
+        by_transaction_type[tx_type] += amount
+        by_payment_method[payment] += 1
+        merchant_totals[merchant] += amount
+
+        if date:
             try:
-                period = datetime.fromisoformat(date_iso).strftime("%Y-%m")
-                monthly[period][currency] += amount
-            except ValueError:
+                monthly[date[:7]][currency] += amount
+            except Exception:
                 pass
 
-        category_totals[m.get("category", "Uncategorized")] += amount
-        merchant_totals[m.get("merchant", "Unknown") or "Unknown"] += amount
+        if tx.get("is_recurring"):
+            period = tx.get("recurrence_period") or "monthly"
+            divisor = {"annual": 12, "quarterly": 3, "weekly": 1 / 4.33}.get(period, 1)
+            recurring_monthly[currency] += amount / divisor if divisor > 1 else amount * abs(divisor)
 
     result = {
-        "totals": {"by_currency": dict(total_by_currency)},
+        "count": len(txns),
+        "totals": {"by_currency": dict(totals)},
+        "refunds": {"by_currency": dict(refunds)},
+        "recurring_monthly": {"by_currency": dict(recurring_monthly)},
         "monthly": [{"period": p, **dict(v)} for p, v in sorted(monthly.items())],
-        "categories": [
-            {"category": cat, "amount": amt}
-            for cat, amt in sorted(
-                category_totals.items(), key=lambda x: x[1], reverse=True
-            )
-        ],
-        "merchants": [
-            {"merchant": mer, "amount": amt}
-            for mer, amt in sorted(
-                merchant_totals.items(), key=lambda x: x[1], reverse=True
-            )[:15]
-        ],
-        "count": len(metas),
+        "by_merchant_category": sorted(
+            [{"category": k, "amount": round(v, 2)} for k, v in by_merchant_category.items()],
+            key=lambda x: x["amount"], reverse=True,
+        ),
+        "by_transaction_type": sorted(
+            [{"type": k, "amount": round(v, 2)} for k, v in by_transaction_type.items()],
+            key=lambda x: x["amount"], reverse=True,
+        ),
+        "by_payment_method": sorted(
+            [{"method": k, "count": v} for k, v in by_payment_method.items()],
+            key=lambda x: x["count"], reverse=True,
+        ),
+        "top_merchants": sorted(
+            [{"merchant": k, "amount": round(v, 2)} for k, v in merchant_totals.items()],
+            key=lambda x: x["amount"], reverse=True,
+        )[:20],
     }
 
     cache.set("expenses_overview", result)

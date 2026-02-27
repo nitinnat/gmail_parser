@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 
@@ -75,8 +76,10 @@ class IngestionPipeline:
         days_ago: int | None = None,
         progress_callback=None,
     ) -> int:
+        # Always exclude trash and spam — we only want inbox/archive mail
+        base = "-in:trash -in:spam"
         query = self.build_time_query(
-            query, after, before, newer_than, older_than, days_ago
+            f"{base} {query}".strip(), after, before, newer_than, older_than, days_ago
         )
         logger.info(
             "[IngestionPipeline] starting full sync (max=%d, query='%s')",
@@ -138,15 +141,12 @@ class IngestionPipeline:
             ]
             embeddings = self._embedding.encode_batch(texts)
 
-            ids = []
-            documents = []
-            metadatas = []
-            for p in parsed:
-                ids.append(p["gmail_id"])
-                documents.append(p["body_text"] or "")
-                metadatas.append(self._build_metadata(p, label_map))
+            built_metadatas = [self._build_metadata(p, label_map) for p in parsed]
+            ids = [p["gmail_id"] for p in parsed]
+            documents = [p["body_text"] or "" for p in parsed]
 
-            self._store.upsert_emails_batch(ids, documents, embeddings, metadatas)
+            self._store.upsert_emails_batch(ids, documents, embeddings, built_metadatas)
+            self._llm_post_process(parsed, built_metadatas)
             total_synced += len(parsed) + len(existing)
             logger.info(
                 "[IngestionPipeline] synced batch %d-%d (%d new, %d skipped, %d failed)",
@@ -209,9 +209,11 @@ class IngestionPipeline:
         try:
             history = self._client.list_history(state["last_history_id"])
         except Exception as e:
-            raise SyncError(
-                f"History API failed (historyId may be too old — run full_sync): {e}"
-            ) from e
+            logger.warning(
+                "[IngestionPipeline] History API failed (%s) — falling back to 7-day sync", e
+            )
+            count = self.full_sync(max_emails=500, days_ago=7)
+            return {"added": count, "deleted": 0, "refreshed": 0, "fallback": True}
 
         added_ids: set[str] = set()
         deleted_ids: set[str] = set()
@@ -236,7 +238,8 @@ class IngestionPipeline:
                 "[IngestionPipeline] incremental: deleted %d emails", len(to_delete)
             )
 
-        # Refresh metadata (labels/read/starred) for label-changed emails
+        # Refresh metadata (labels/read/starred) for label-changed emails.
+        # If an email was moved to Trash or Spam, delete it instead of updating.
         refresh_ids = list(label_changed_ids - added_ids - deleted_ids)
         refreshed = 0
         if refresh_ids:
@@ -246,20 +249,32 @@ class IngestionPipeline:
             )
             update_ids = []
             update_metas = []
+            trashed_ids = []
             for raw in meta_messages:
                 p = GmailClient.parse_message_metadata(raw)
-                label_names = [label_map.get(lid, lid) for lid in p["label_ids"]]
-                labels_str = "|" + "|".join(label_names) + "|" if label_names else ""
-                update_ids.append(p["gmail_id"])
-                update_metas.append(
-                    {
-                        "labels": labels_str,
-                        "is_read": p["is_read"],
-                        "is_starred": p["is_starred"],
-                        "history_id": p["history_id"],
-                    }
+                if "TRASH" in p["label_ids"] or "SPAM" in p["label_ids"]:
+                    trashed_ids.append(p["gmail_id"])
+                else:
+                    label_names = [label_map.get(lid, lid) for lid in p["label_ids"]]
+                    labels_str = "|" + "|".join(label_names) + "|" if label_names else ""
+                    update_ids.append(p["gmail_id"])
+                    update_metas.append(
+                        {
+                            "labels": labels_str,
+                            "is_read": p["is_read"],
+                            "is_starred": p["is_starred"],
+                            "history_id": p["history_id"],
+                        }
+                    )
+            if trashed_ids:
+                self._store.delete_emails(trashed_ids)
+                self._store.delete_expenses(trashed_ids)
+                logger.info(
+                    "[IngestionPipeline] incremental: deleted %d trashed/spammed emails",
+                    len(trashed_ids),
                 )
-            self._store.update_metadatas_batch(update_ids, update_metas)
+            if update_ids:
+                self._store.update_metadatas_batch(update_ids, update_metas)
             refreshed = len(update_ids)
             logger.info(
                 "[IngestionPipeline] incremental: refreshed metadata for %d emails",
@@ -284,12 +299,14 @@ class IngestionPipeline:
                 for p in parsed
             ]
             embeddings = self._embedding.encode_batch(texts)
+            built_metadatas = [self._build_metadata(p, label_map) for p in parsed]
             self._store.upsert_emails_batch(
                 [p["gmail_id"] for p in parsed],
                 [p["body_text"] or "" for p in parsed],
                 embeddings,
-                [self._build_metadata(p, label_map) for p in parsed],
+                built_metadatas,
             )
+            self._llm_post_process(parsed, built_metadatas)
             added = len(parsed)
 
         try:
@@ -359,6 +376,55 @@ class IngestionPipeline:
         }
         metadata["category"] = categorize(metadata)
         return metadata
+
+    def _llm_post_process(self, parsed: list[dict], built_metadatas: list[dict]) -> None:
+        if not parsed:
+            return
+        from gmail_parser.llm_extractor import extract_batch
+
+        email_inputs = [
+            {
+                "id": p["gmail_id"],
+                "subject": p.get("subject", ""),
+                "sender": p.get("sender", ""),
+                "snippet": p.get("snippet", ""),
+                "metadata": m,
+            }
+            for p, m in zip(parsed, built_metadatas)
+        ]
+
+        try:
+            results = extract_batch(email_inputs)
+        except Exception as exc:
+            logger.warning("[IngestionPipeline] LLM extraction failed: %s", exc)
+            results = {}
+
+        ids, updates = [], []
+        for p in parsed:
+            gid = p["gmail_id"]
+            result = results.get(gid, {})
+            action_items = result.get("action_items", [])
+            spending = result.get("spending", {"is_transaction": False, "transactions": []})
+            update: dict = {
+                "actions_extracted": True,
+                "action_items_json": json.dumps(action_items),
+                "has_action_items": bool(action_items),
+                "spending_json": json.dumps(spending),
+                "has_transactions": bool(spending.get("transactions")),
+            }
+            if result.get("category"):
+                update["category"] = result["category"]
+                update["llm_categorized"] = True
+            ids.append(gid)
+            updates.append(update)
+
+        self._store.update_metadatas_batch(ids, updates)
+        action_count = sum(1 for u in updates if u.get("has_action_items"))
+        logger.info(
+            "[IngestionPipeline] LLM post-processed %d emails, %d with action items",
+            len(ids),
+            action_count,
+        )
 
     def _update_sync_state(self, count: int, history_id: str = ""):
         state = self._store.get_sync_state()

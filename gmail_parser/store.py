@@ -24,7 +24,7 @@ class EmailStore:
             "expenses",
             metadata={"hnsw:space": "cosine"},
         )
-        logger.info(
+        logger.debug(
             "[EmailStore] initialized at %s", persist_dir or settings.chroma_persist_dir
         )
 
