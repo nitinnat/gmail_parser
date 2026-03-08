@@ -28,6 +28,8 @@ _state = {
     "error": None,
 }
 _lock = threading.Lock()
+_cancel_sync = threading.Event()
+_cancel_llm = threading.Event()
 
 _AUTO_SYNC_INTERVAL_SECS = 30
 _auto_sync = {"enabled": True, "interval_hours": _AUTO_SYNC_INTERVAL_SECS / 3600, "next_run": time.time() + _AUTO_SYNC_INTERVAL_SECS}
@@ -70,9 +72,10 @@ class SyncRequest(BaseModel):
 
 
 def _run_sync(req: SyncRequest):
+    _cancel_sync.clear()
     with _lock:
         _state.update(
-            {"is_syncing": True, "synced": 0, "total": 0, "error": None, "events": []}
+            {"is_syncing": True, "synced": 0, "total": 0, "error": None, "events": [], "cancelled": False}
         )
     cache.invalidate(
         "overview",
@@ -111,8 +114,14 @@ def _run_sync(req: SyncRequest):
         else:
             _push_event(f"Fetching message list (all mail, max {req.max_emails:,})…")
 
+        kwargs["cancel_check"] = _cancel_sync.is_set
         count = pipeline.full_sync(**kwargs)
-        _push_event(f"Done — {count:,} emails synced successfully")
+        if _cancel_sync.is_set():
+            with _lock:
+                _state["cancelled"] = True
+            _push_event(f"Sync cancelled — {count:,} emails synced before stop")
+        else:
+            _push_event(f"Done — {count:,} emails synced successfully")
     except Exception as e:
         with _lock:
             _state["error"] = str(e)
@@ -251,6 +260,7 @@ def _run_llm_process(force: bool = False):
     from gmail_parser.llm_extractor import extract_batch, _BATCH_SIZE
     import json
 
+    _cancel_llm.clear()
     store = EmailStore()
     all_emails = store.get_all_emails(include=["metadatas", "documents"])
     ids = all_emails["ids"]
@@ -265,7 +275,7 @@ def _run_llm_process(force: bool = False):
     total = len(unprocessed)
 
     with _llm_lock:
-        _llm_state.update({"is_running": True, "processed": 0, "total": total, "error": None})
+        _llm_state.update({"is_running": True, "processed": 0, "total": total, "error": None, "cancelled": False})
 
     _llm_logger.info(
         "LLM processing started — %d emails to process (%d per call)%s",
@@ -295,13 +305,16 @@ def _run_llm_process(force: bool = False):
         _llm_logger.info("LLM processing — %d / %d emails done", done, _total)
 
     try:
-        results = extract_batch(email_inputs, progress_callback=_on_progress)
+        results = extract_batch(email_inputs, progress_callback=_on_progress, cancel_event=_cancel_llm)
 
         update_ids, updates = [], []
         action_count = 0
         tx_count = 0
+        # Only update emails that were actually processed (results may be partial on cancel)
         for gid, _, _ in unprocessed:
-            result = results.get(gid, {})
+            if gid not in results:
+                continue
+            result = results[gid]
             action_items = result.get("action_items", [])
             spending = result.get("spending", {"is_transaction": False, "transactions": []})
             update: dict = {
@@ -321,15 +334,24 @@ def _run_llm_process(force: bool = False):
             update_ids.append(gid)
             updates.append(update)
 
-        store.update_metadatas_batch(update_ids, updates)
+        if update_ids:
+            store.update_metadatas_batch(update_ids, updates)
+
+        cancelled = _cancel_llm.is_set()
         with _llm_lock:
-            _llm_state["processed"] = total
+            _llm_state["processed"] = len(update_ids)
+            _llm_state["cancelled"] = cancelled
 
         cache.invalidate("alerts", "overview", "categories", "expenses_overview", "expenses_tx")
-        _llm_logger.info(
-            "LLM processing done — %d emails, %d with action items, %d with transactions",
-            total, action_count, tx_count,
-        )
+        if cancelled:
+            _llm_logger.info(
+                "LLM processing cancelled — %d / %d emails processed", len(update_ids), total
+            )
+        else:
+            _llm_logger.info(
+                "LLM processing done — %d emails, %d with action items, %d with transactions",
+                total, action_count, tx_count,
+            )
     except Exception as e:
         with _llm_lock:
             _llm_state["error"] = str(e)
@@ -357,6 +379,25 @@ def start_llm_process(req: LlmProcessRequest = LlmProcessRequest()):
 def llm_process_status():
     with _llm_lock:
         return dict(_llm_state)
+
+
+@router.post("/cancel")
+def cancel_sync():
+    with _lock:
+        if not _state["is_syncing"]:
+            return {"message": "No sync in progress"}
+    _cancel_sync.set()
+    _push_event("Cancellation requested…")
+    return {"message": "Cancellation requested"}
+
+
+@router.post("/llm-cancel")
+def cancel_llm_process():
+    with _llm_lock:
+        if not _llm_state["is_running"]:
+            return {"message": "No LLM processing in progress"}
+    _cancel_llm.set()
+    return {"message": "Cancellation requested"}
 
 
 @router.post("/categorize")
