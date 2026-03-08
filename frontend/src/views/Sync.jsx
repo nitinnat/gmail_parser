@@ -114,6 +114,11 @@ export default function SyncPage() {
     fetchLogs()
   }
 
+  const cancelSync = async () => {
+    await api.sync.cancel()
+    fetchAll()
+  }
+
   const startIncremental = async () => {
     await api.sync.incremental()
     setApiLogs([])
@@ -137,6 +142,10 @@ export default function SyncPage() {
       setLlmStatus(s)
       if (!s.is_running) clearInterval(poll)
     }, 2000)
+  }
+
+  const cancelLlmProcess = async () => {
+    await api.sync.llmCancel()
   }
 
   useEffect(() => {
@@ -322,16 +331,27 @@ export default function SyncPage() {
           </div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={startSync}
-            disabled={isSyncing}
-            className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150 disabled:opacity-40"
-            style={{ color: 'var(--accent)', border: '1px solid rgba(0,200,240,0.4)', background: 'rgba(0,200,240,0.06)' }}
-            onMouseEnter={(e) => { if (!isSyncing) e.currentTarget.style.background = 'rgba(0,200,240,0.12)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,200,240,0.06)' }}
-          >
-            {isSyncing ? 'Sync Running…' : 'Start Sync'}
-          </button>
+          {isSyncing ? (
+            <button
+              onClick={cancelSync}
+              className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150"
+              style={{ color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.06)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.12)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.06)' }}
+            >
+              Cancel Sync
+            </button>
+          ) : (
+            <button
+              onClick={startSync}
+              className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150"
+              style={{ color: 'var(--accent)', border: '1px solid rgba(0,200,240,0.4)', background: 'rgba(0,200,240,0.06)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,200,240,0.12)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,200,240,0.06)' }}
+            >
+              Start Sync
+            </button>
+          )}
           <button
             onClick={startIncremental}
             disabled={isSyncing || !status?.has_history_id}
@@ -374,26 +394,38 @@ export default function SyncPage() {
           </div>
         )}
         <div className="flex gap-3 flex-wrap">
-          <button
-            onClick={() => startLlmProcess(false)}
-            disabled={llmStatus?.is_running}
-            className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150 disabled:opacity-40"
-            style={{ color: 'var(--accent)', border: '1px solid rgba(0,200,240,0.3)', background: 'rgba(0,200,240,0.06)' }}
-            onMouseEnter={(e) => { if (!llmStatus?.is_running) e.currentTarget.style.background = 'rgba(0,200,240,0.1)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,200,240,0.06)' }}
-          >
-            {llmStatus?.is_running ? `Processing… (${llmStatus.processed}/${llmStatus.total})` : 'Run LLM Processing'}
-          </button>
-          <button
-            onClick={() => startLlmProcess(true)}
-            disabled={llmStatus?.is_running}
-            className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150 disabled:opacity-40"
-            style={{ color: 'var(--base-400)', border: '1px solid var(--border)', background: 'transparent' }}
-            onMouseEnter={(e) => { if (!llmStatus?.is_running) e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-          >
-            Reprocess All
-          </button>
+          {llmStatus?.is_running ? (
+            <button
+              onClick={cancelLlmProcess}
+              className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150"
+              style={{ color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.06)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.12)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.06)' }}
+            >
+              Cancel
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => startLlmProcess(false)}
+                className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150"
+                style={{ color: 'var(--accent)', border: '1px solid rgba(0,200,240,0.3)', background: 'rgba(0,200,240,0.06)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,200,240,0.1)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,200,240,0.06)' }}
+              >
+                Run LLM Processing
+              </button>
+              <button
+                onClick={() => startLlmProcess(true)}
+                className="px-6 py-2.5 text-[11px] tracking-widest uppercase transition-all duration-150"
+                style={{ color: 'var(--base-400)', border: '1px solid var(--border)', background: 'transparent' }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+              >
+                Reprocess All
+              </button>
+            </>
+          )}
         </div>
       </div>
 

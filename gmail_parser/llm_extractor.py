@@ -21,7 +21,7 @@ _MAX_WORKERS = 8
 #     "merchant": "Netflix",             // as it appears in the email
 #     "merchant_normalized": "Netflix",  // cleaned-up canonical name
 #     "merchant_category": "Streaming",  // specific sub-category (e.g. Groceries, SaaS, Flights)
-#     "transaction_type": "subscription",// purchase|refund|transfer|subscription|bill|fee|atm|other
+#     "transaction_type": "subscription",// purchase|refund|subscription|bill|fee|other
 #     "payment_method": "credit_card",   // credit_card|debit_card|bank_transfer|upi|wallet|bnpl|cash|other
 #     "card_last4": "4242",
 #     "card_network": "Visa",            // Visa|Mastercard|Amex|Discover|RuPay|other
@@ -40,10 +40,11 @@ _MAX_WORKERS = 8
 # }
 
 
-def extract_batch(emails: list[dict], progress_callback=None) -> dict[str, dict]:
+def extract_batch(emails: list[dict], progress_callback=None, cancel_event=None) -> dict[str, dict]:
     """emails: list of {id, subject, sender, snippet, metadata}.
     Returns id -> {category, action_items, spending}.
-    progress_callback(done, total) called as chunks complete."""
+    progress_callback(done, total) called as chunks complete.
+    cancel_event: threading.Event — if set, stops after completing in-flight chunks."""
     total = len(emails)
     chunks = [emails[i : i + _BATCH_SIZE] for i in range(0, total, _BATCH_SIZE)]
     results: dict[str, dict] = {}
@@ -55,6 +56,11 @@ def extract_batch(emails: list[dict], progress_callback=None) -> dict[str, dict]
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
         futures = {executor.submit(_extract_chunk, chunk): chunk for chunk in chunks}
         for future in as_completed(futures):
+            if cancel_event and cancel_event.is_set():
+                for f in list(futures.keys()):
+                    f.cancel()
+                logger.info("[llm_extractor] cancellation requested — stopping after in-flight chunks")
+                break
             chunk_results = future.result()
             with lock:
                 results.update(chunk_results)
@@ -79,9 +85,17 @@ def _extract_chunk(batch: list[dict]) -> dict[str, dict]:
         f"Today is {today}. For each email do three things:\n"
         f"1. Categorize into exactly one of: {', '.join(categories)}\n"
         "2. Extract action items required FROM THE RECIPIENT (deadlines if mentioned, urgency: high/medium/low)\n"
-        "3. Extract spending/transaction data if the email is a receipt, payment confirmation, bank alert, or invoice.\n"
-        "   For spending, capture: amount, currency, merchant, merchant_normalized, merchant_category (specific e.g. Groceries/SaaS/Flights/Dining), "
-        "transaction_type (purchase|refund|transfer|subscription|bill|fee|atm|other), "
+        "3. Extract genuine out-of-pocket spending ONLY if the email is a merchant receipt, purchase/order confirmation, or service invoice/bill.\n"
+        "   ONLY extract real spending where money leaves your pocket for goods or services.\n"
+        "   DO NOT extract any of these — set is_transaction:false and transactions:[] for them:\n"
+        "     - Transfers between your own accounts (bank-to-bank, savings, brokerage funding)\n"
+        "     - Investment transactions (stock/crypto/ETF orders, dividends, interest credited, brokerage confirmations)\n"
+        "     - Payroll or salary deposits\n"
+        "     - Credit card bill payments / autopay (paying off a card balance is not new spending)\n"
+        "     - Bank account alerts for internal movements or balance changes\n"
+        "     - ATM withdrawals\n"
+        "   For genuine spending, capture: amount, currency, merchant, merchant_normalized, merchant_category (specific e.g. Groceries/SaaS/Flights/Dining), "
+        "transaction_type (purchase|refund|subscription|bill|fee|other), "
         "payment_method (credit_card|debit_card|bank_transfer|upi|wallet|bnpl|cash|other), "
         "card_last4, card_network (Visa|Mastercard|Amex|Discover|RuPay|other), account_name, "
         "date (YYYY-MM-DD, use transaction date not email date), description, "

@@ -75,6 +75,7 @@ class IngestionPipeline:
         older_than: str | None = None,
         days_ago: int | None = None,
         progress_callback=None,
+        cancel_check=None,
     ) -> int:
         # Always exclude trash and spam — we only want inbox/archive mail
         base = "-in:trash -in:spam"
@@ -103,6 +104,9 @@ class IngestionPipeline:
         total_failed = 0
         all_failed_ids = []
         for i in range(0, total_messages, batch_size):
+            if cancel_check and cancel_check():
+                logger.info("[IngestionPipeline] sync cancelled at batch %d", i)
+                return total_synced
             chunk_ids = [m["id"] for m in message_stubs[i : i + batch_size]]
             existing = self._store.get_existing_ids(chunk_ids)
             new_ids = [mid for mid in chunk_ids if mid not in existing]
